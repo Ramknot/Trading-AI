@@ -1,0 +1,290 @@
+"""Immutable, typed business models shared across Trading AI components."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime
+from decimal import Decimal
+from enum import Enum
+from typing import Mapping
+
+
+class ExecutionEnvironment(str, Enum):
+    """Strictly separated runtime environments."""
+
+    DEV = "DEV"
+    TEST = "TEST"
+    PAPER = "PAPER"
+    LIVE = "LIVE"
+
+
+class TradingProfileName(str, Enum):
+    """Supported profile identities; aggressive is locked in Lot 0."""
+
+    BALANCED = "balanced"
+    AGGRESSIVE = "aggressive"
+
+
+class TradeAction(str, Enum):
+    BUY = "BUY"
+    SELL = "SELL"
+    HOLD = "HOLD"
+
+
+class OrderSide(str, Enum):
+    BUY = "BUY"
+    SELL = "SELL"
+
+
+class OrderType(str, Enum):
+    MARKET = "MARKET"
+    LIMIT = "LIMIT"
+
+
+class RiskDecisionStatus(str, Enum):
+    APPROVE = "APPROVE"
+    REJECT = "REJECT"
+
+
+class ExecutionStatus(str, Enum):
+    BLOCKED = "BLOCKED"
+    SUBMITTED = "SUBMITTED"
+
+
+def _require_non_empty(value: str, field_name: str) -> None:
+    if not value or not value.strip():
+        raise ValueError(f"{field_name} must not be empty")
+
+
+def _require_aware(timestamp: datetime, field_name: str) -> None:
+    if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+        raise ValueError(f"{field_name} must be timezone-aware")
+
+
+@dataclass(frozen=True, slots=True)
+class TradingProfile:
+    """Validated profile parameters loaded from TOML."""
+
+    name: TradingProfileName
+    enabled: bool
+    timeframes: tuple[str, ...]
+    asset_universe: tuple[str, ...]
+    max_positions: int
+    max_exposure: float
+    max_turnover: float
+    allow_short: bool
+    risk_budget: float
+    signal_threshold: float
+
+    def __post_init__(self) -> None:
+        if not self.timeframes:
+            raise ValueError("timeframes must not be empty")
+        if not self.asset_universe:
+            raise ValueError("asset_universe must not be empty")
+        if self.max_positions <= 0:
+            raise ValueError("max_positions must be positive")
+        for field_name in (
+            "max_exposure",
+            "max_turnover",
+            "risk_budget",
+            "signal_threshold",
+        ):
+            value = getattr(self, field_name)
+            if not 0.0 <= value <= 1.0:
+                raise ValueError(f"{field_name} must be between 0 and 1")
+
+
+@dataclass(frozen=True, slots=True)
+class TradingContext:
+    """Environment and profile attached to every decision chain."""
+
+    environment: ExecutionEnvironment
+    profile: TradingProfileName
+
+
+@dataclass(frozen=True, slots=True)
+class Signal:
+    """A normalized strategy input signal without execution authority."""
+
+    signal_id: str
+    symbol: str
+    strength: float
+    generated_at: datetime
+    metadata: Mapping[str, str] | None = None
+
+    def __post_init__(self) -> None:
+        _require_non_empty(self.signal_id, "signal_id")
+        _require_non_empty(self.symbol, "symbol")
+        _require_aware(self.generated_at, "generated_at")
+        if not -1.0 <= self.strength <= 1.0:
+            raise ValueError("strength must be between -1 and 1")
+
+
+@dataclass(frozen=True, slots=True)
+class StrategyDecision:
+    """A strategy opinion; it is never permission to place an order."""
+
+    decision_id: str
+    signal_id: str
+    action: TradeAction
+    confidence: float
+    rationale: str
+
+    def __post_init__(self) -> None:
+        _require_non_empty(self.decision_id, "decision_id")
+        _require_non_empty(self.signal_id, "signal_id")
+        if not 0.0 <= self.confidence <= 1.0:
+            raise ValueError("confidence must be between 0 and 1")
+
+
+@dataclass(frozen=True, slots=True)
+class OrderRequest:
+    """An order proposal that still requires RiskEngine authorization."""
+
+    order_id: str
+    symbol: str
+    side: OrderSide
+    quantity: Decimal
+    order_type: OrderType = OrderType.MARKET
+    limit_price: Decimal | None = None
+    strategy_decision_id: str | None = None
+
+    def __post_init__(self) -> None:
+        _require_non_empty(self.order_id, "order_id")
+        _require_non_empty(self.symbol, "symbol")
+        if self.quantity <= Decimal("0"):
+            raise ValueError("quantity must be positive")
+        if self.order_type is OrderType.LIMIT and self.limit_price is None:
+            raise ValueError("limit_price is required for LIMIT orders")
+        if self.limit_price is not None and self.limit_price <= Decimal("0"):
+            raise ValueError("limit_price must be positive")
+
+
+@dataclass(frozen=True, slots=True)
+class Position:
+    """A portfolio position; negative quantity represents a short."""
+
+    symbol: str
+    quantity: Decimal
+    average_price: Decimal
+
+    def __post_init__(self) -> None:
+        _require_non_empty(self.symbol, "symbol")
+        if self.average_price < Decimal("0"):
+            raise ValueError("average_price must not be negative")
+
+
+@dataclass(frozen=True, slots=True)
+class PortfolioSnapshot:
+    """An immutable point-in-time portfolio view."""
+
+    as_of: datetime
+    cash: Decimal
+    total_equity: Decimal
+    positions: tuple[Position, ...] = ()
+
+    def __post_init__(self) -> None:
+        _require_aware(self.as_of, "as_of")
+        if self.total_equity < Decimal("0"):
+            raise ValueError("total_equity must not be negative")
+        symbols = [position.symbol for position in self.positions]
+        if len(symbols) != len(set(symbols)):
+            raise ValueError("positions must have unique symbols")
+
+
+@dataclass(frozen=True, slots=True)
+class RiskDecision:
+    """The only decision that may authorize entry into execution."""
+
+    decision_id: str
+    order_id: str
+    status: RiskDecisionStatus
+    reason: str
+    risk_engine: str
+
+    def __post_init__(self) -> None:
+        _require_non_empty(self.decision_id, "decision_id")
+        _require_non_empty(self.order_id, "order_id")
+        _require_non_empty(self.reason, "reason")
+        _require_non_empty(self.risk_engine, "risk_engine")
+
+
+@dataclass(frozen=True, slots=True)
+class RiskApprovedOrder:
+    """Order envelope accepted by brokers after a positive risk decision."""
+
+    order: OrderRequest
+    risk_decision: RiskDecision
+
+    def __post_init__(self) -> None:
+        if self.risk_decision.status is not RiskDecisionStatus.APPROVE:
+            raise ValueError("only approved risk decisions may create this envelope")
+        if self.risk_decision.order_id != self.order.order_id:
+            raise ValueError("risk decision and order IDs must match")
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionReceipt:
+    """Broker acknowledgement returned after guarded submission."""
+
+    order_id: str
+    broker_order_id: str
+    accepted_at: datetime
+
+    def __post_init__(self) -> None:
+        _require_non_empty(self.order_id, "order_id")
+        _require_non_empty(self.broker_order_id, "broker_order_id")
+        _require_aware(self.accepted_at, "accepted_at")
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionResult:
+    """Result of the guarded execution entry point."""
+
+    order_id: str
+    status: ExecutionStatus
+    message: str
+    risk_decision: RiskDecision
+    receipt: ExecutionReceipt | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class MarketBar:
+    """Minimal typed OHLCV bar for future data and backtesting lots."""
+
+    symbol: str
+    timeframe: str
+    timestamp: datetime
+    open: Decimal
+    high: Decimal
+    low: Decimal
+    close: Decimal
+    volume: Decimal
+
+    def __post_init__(self) -> None:
+        _require_non_empty(self.symbol, "symbol")
+        _require_non_empty(self.timeframe, "timeframe")
+        _require_aware(self.timestamp, "timestamp")
+        if self.high < max(self.open, self.close, self.low):
+            raise ValueError("high must be the greatest OHLC value")
+        if self.low > min(self.open, self.close, self.high):
+            raise ValueError("low must be the smallest OHLC value")
+        if self.volume < Decimal("0"):
+            raise ValueError("volume must not be negative")
+
+
+@dataclass(frozen=True, slots=True)
+class BacktestResult:
+    """Small result envelope; financial metrics arrive in later lots."""
+
+    run_id: str
+    started_at: datetime
+    finished_at: datetime
+    metrics: Mapping[str, float]
+
+    def __post_init__(self) -> None:
+        _require_non_empty(self.run_id, "run_id")
+        _require_aware(self.started_at, "started_at")
+        _require_aware(self.finished_at, "finished_at")
+        if self.finished_at < self.started_at:
+            raise ValueError("finished_at must not precede started_at")

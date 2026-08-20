@@ -1,0 +1,10 @@
+name = "balanced"
+enabled = true
+timeframes = ["1h", "4h", "1d"]
+asset_universe = ["BTC-USD", "ETH-USD"]
+max_positions = 5
+max_exposure = 0.60
+max_turnover = 0.25
+allow_short = false
+risk_budget = 0.01
+signal_threshold = 0.65

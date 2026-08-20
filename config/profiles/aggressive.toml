@@ -1,0 +1,10 @@
+name = "aggressive"
+enabled = false
+timeframes = ["15m", "1h", "4h"]
+asset_universe = ["BTC-USD", "ETH-USD", "SOL-USD"]
+max_positions = 10
+max_exposure = 0.85
+max_turnover = 0.60
+allow_short = true
+risk_budget = 0.025
+signal_threshold = 0.55

@@ -1,0 +1,45 @@
+# Python environments and bytecode
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Test, coverage and build artefacts
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials*.json
+secrets*.toml
+
+# Local data, logs and temporary files
+data_local/
+logs/
+var/
+*.log
+*.tmp
+*.bak
+
+# IDE and OS files
+.idea/
+.vscode/
+*.code-workspace
+.DS_Store
+Thumbs.db
+
+# Repository-local tooling used by Codex
+.tools/
