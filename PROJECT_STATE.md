@@ -3,6 +3,7 @@
 ## Delivery lots
 
 - Lot 0 — Foundations: DONE
+- Lot 0.1 — Market universe alignment + CI: DONE
 - Lot 1 — Data Engine: TODO
 - Lot 2 — Backtesting Engine: TODO
 - Lot 3 — Baseline Quant: TODO

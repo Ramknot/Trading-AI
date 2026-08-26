@@ -1,7 +1,21 @@
 name = "balanced"
 enabled = true
 timeframes = ["1h", "4h", "1d"]
-asset_universe = ["BTC-USD", "ETH-USD"]
+asset_universe = [
+  "SPY",
+  "QQQ",
+  "IWM",
+  "AAPL",
+  "MSFT",
+  "NVDA",
+  "AMZN",
+  "GOOGL",
+  "META",
+  "ASML",
+  "SAP",
+  "MC.PA",
+  "AIR.PA",
+]
 max_positions = 5
 max_exposure = 0.60
 max_turnover = 0.25

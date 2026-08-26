@@ -82,9 +82,23 @@ The suite covers profile loading, environment locks, immutable model validation,
 
 ## Profiles
 
-`balanced.toml` is the default research/paper profile. Its fields prepare timeframes, asset universe, position limits, exposure, turnover, short policy, risk budget, and signal thresholds.
+`balanced.toml` is the default research/paper profile. Its fields prepare timeframes, asset universe, position limits, exposure, turnover, short policy, risk budget, and signal thresholds. The active universe is always loaded from this configuration; it is not duplicated inside data, strategy, backtesting, portfolio, or risk components.
 
-`aggressive.toml` uses the same schema and contains `enabled = false`. Lot 0 additionally rejects `aggressive` in Python regardless of the TOML flag, so editing configuration alone cannot activate it.
+`aggressive.toml` uses the same schema, contains a preparatory equity/ETF universe, and keeps `enabled = false`. Lot 0 additionally rejects `aggressive` in Python regardless of the TOML flag, so editing configuration alone cannot activate it.
+
+## V1 market-universe policy
+
+Balanced V1 prioritizes liquid index ETFs, liquid US large caps, and liquid European large caps. Its initial configured universe is:
+
+```text
+SPY, QQQ, IWM,
+AAPL, MSFT, NVDA, AMZN, GOOGL, META,
+ASML, SAP, MC.PA, AIR.PA
+```
+
+This scope favors liquidity, reasonable spreads, abundant historical data, straightforward backtesting, and compatibility with a future traditional broker. It also avoids introducing the 24/7 market, venue, custody, and data-quality concerns specific to crypto assets at the start of the project.
+
+Crypto assets, options, futures, CFDs, significant leverage, and high-frequency trading are outside the initial V1 priority. They may be researched later only through dedicated, reviewed lots without weakening the balanced profile or the mandatory risk boundary.
 
 ## Security boundaries
 

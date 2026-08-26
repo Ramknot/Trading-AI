@@ -21,4 +21,6 @@ These rules apply to Codex and every future development agent working in this re
 - Do not change the central architecture without documenting the reason and migration impact.
 - Prefer the Python standard library and add dependencies only when they clearly reduce project risk or complexity.
 - Keep generated files, caches, local datasets, logs, virtual environments, and credentials out of version control.
+- Market universes must come from configuration and must not be hard-coded inside strategies, data engines, backtesters, portfolio engines, or risk engines.
+- Every pull request and important modification must leave the continuous-integration workflow green.
 - Update `PROJECT_STATE.md` when a lot changes state.

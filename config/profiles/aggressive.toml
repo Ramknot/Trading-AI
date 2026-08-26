@@ -1,7 +1,23 @@
 name = "aggressive"
 enabled = false
 timeframes = ["15m", "1h", "4h"]
-asset_universe = ["BTC-USD", "ETH-USD", "SOL-USD"]
+asset_universe = [
+  "SPY",
+  "QQQ",
+  "IWM",
+  "AAPL",
+  "MSFT",
+  "NVDA",
+  "AMZN",
+  "GOOGL",
+  "META",
+  "ASML",
+  "SAP",
+  "MC.PA",
+  "AIR.PA",
+  "AMD",
+  "TSLA",
+]
 max_positions = 10
 max_exposure = 0.85
 max_turnover = 0.60

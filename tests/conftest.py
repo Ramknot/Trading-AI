@@ -36,7 +36,7 @@ def portfolio() -> PortfolioSnapshot:
 def order() -> OrderRequest:
     return OrderRequest(
         order_id="order-001",
-        symbol="BTC-USD",
+        symbol="AAPL",
         side=OrderSide.BUY,
         quantity=Decimal("0.01"),
     )

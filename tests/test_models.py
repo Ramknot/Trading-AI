@@ -20,7 +20,7 @@ from trading_ai.core.models import (
 def test_signal_is_validated_and_immutable() -> None:
     signal = Signal(
         signal_id="signal-1",
-        symbol="BTC-USD",
+        symbol="AAPL",
         strength=0.8,
         generated_at=datetime.now(timezone.utc),
     )
@@ -30,7 +30,7 @@ def test_signal_is_validated_and_immutable() -> None:
     with pytest.raises(ValueError, match="between -1 and 1"):
         Signal(
             signal_id="signal-2",
-            symbol="BTC-USD",
+            symbol="AAPL",
             strength=1.1,
             generated_at=datetime.now(timezone.utc),
         )
@@ -40,7 +40,7 @@ def test_limit_order_requires_positive_price() -> None:
     with pytest.raises(ValueError, match="limit_price is required"):
         OrderRequest(
             order_id="limit-1",
-            symbol="ETH-USD",
+            symbol="MSFT",
             side=OrderSide.BUY,
             quantity=Decimal("1"),
             order_type=OrderType.LIMIT,
@@ -62,8 +62,8 @@ def test_rejected_decision_cannot_form_broker_envelope(order) -> None:
 
 def test_portfolio_rejects_duplicate_symbols() -> None:
     positions = (
-        Position("BTC-USD", Decimal("1"), Decimal("50000")),
-        Position("BTC-USD", Decimal("2"), Decimal("51000")),
+        Position("AAPL", Decimal("1"), Decimal("200")),
+        Position("AAPL", Decimal("2"), Decimal("210")),
     )
 
     with pytest.raises(ValueError, match="unique symbols"):
