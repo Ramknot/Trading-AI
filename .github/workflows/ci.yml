@@ -31,4 +31,4 @@ jobs:
         run: python -m compileall -q src
 
       - name: Run tests
-        run: python -m pytest
+        run: python -m pytest -m "not integration"

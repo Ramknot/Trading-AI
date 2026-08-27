@@ -5,12 +5,17 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "trading-ai"
 version = "0.0.1"
-description = "Safety-first modular foundations for the Trading AI project"
+description = "Safety-first modular research and historical market-data engine"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }
 authors = [{ name = "Ramknot" }]
-dependencies = []
+dependencies = [
+  "pandas>=2.2,<3",
+  "pandas-market-calendars>=4.4,<6",
+  "pyarrow>=15,<24",
+  "yfinance>=0.2.54,<0.3",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -27,3 +32,9 @@ where = ["src"]
 addopts = "-q"
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+  "integration: opt-in tests that require an external network provider",
+]
+filterwarnings = [
+  "ignore:The 'generic' unit for NumPy timedelta is deprecated:DeprecationWarning",
+]

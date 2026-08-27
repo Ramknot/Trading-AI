@@ -250,7 +250,7 @@ class ExecutionResult:
 
 @dataclass(frozen=True, slots=True)
 class MarketBar:
-    """Minimal typed OHLCV bar for future data and backtesting lots."""
+    """Normalized immutable OHLCV bar using explicit timezone-aware time."""
 
     symbol: str
     timeframe: str
@@ -260,17 +260,27 @@ class MarketBar:
     low: Decimal
     close: Decimal
     volume: Decimal
+    adjusted_close: Decimal | None = None
+    source: str = "unknown"
 
     def __post_init__(self) -> None:
         _require_non_empty(self.symbol, "symbol")
         _require_non_empty(self.timeframe, "timeframe")
+        _require_non_empty(self.source, "source")
         _require_aware(self.timestamp, "timestamp")
-        if self.high < max(self.open, self.close, self.low):
-            raise ValueError("high must be the greatest OHLC value")
-        if self.low > min(self.open, self.close, self.high):
-            raise ValueError("low must be the smallest OHLC value")
+        for field_name in ("open", "high", "low", "close"):
+            if getattr(self, field_name) <= Decimal("0"):
+                raise ValueError(f"{field_name} must be positive")
+        if self.high < self.low:
+            raise ValueError("high must not be lower than low")
+        if self.high < self.open or self.high < self.close:
+            raise ValueError("high must be at least open and close")
+        if self.low > self.open or self.low > self.close:
+            raise ValueError("low must be at most open and close")
         if self.volume < Decimal("0"):
             raise ValueError("volume must not be negative")
+        if self.adjusted_close is not None and self.adjusted_close <= Decimal("0"):
+            raise ValueError("adjusted_close must be positive when present")
 
 
 @dataclass(frozen=True, slots=True)

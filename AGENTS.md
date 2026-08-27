@@ -23,4 +23,10 @@ These rules apply to Codex and every future development agent working in this re
 - Keep generated files, caches, local datasets, logs, virtual environments, and credentials out of version control.
 - Market universes must come from configuration and must not be hard-coded inside strategies, data engines, backtesters, portfolio engines, or risk engines.
 - Every pull request and important modification must leave the continuous-integration workflow green.
+- Never silently repair invalid market data; reject it or report it explicitly.
+- Never mix raw and adjusted prices without explicit metadata.
+- All normalized market-data timestamps must be timezone-aware.
+- Network access must not be required by the default test suite.
+- Provider-specific objects must not leak outside `DataProvider` adapters.
+- Derived datasets must record the exact source-dataset lineage.
 - Update `PROJECT_STATE.md` when a lot changes state.
