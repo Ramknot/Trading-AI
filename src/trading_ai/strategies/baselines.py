@@ -22,10 +22,13 @@ from trading_ai.features import (
 )
 from trading_ai.strategies.config import (
     BreakoutConfig,
+    MeanReversionConfig,
     MomentumConfig,
     TrendConfig,
 )
 from trading_ai.strategies.sizing import BaselineSizer
+from trading_ai.regimes.models import StructureRegime
+from trading_ai.regimes.models import ActivationDecision, ActivationStatus
 
 
 def _symbols(values: Sequence[str]) -> tuple[str, ...]:
@@ -74,6 +77,26 @@ class _FeatureBaseline(BacktestStrategy):
 
     def _reset_state(self) -> None:
         pass
+
+    def on_activation_decision(self, decision: ActivationDecision) -> None:
+        """Release a proposal marker when regime policy blocks the entry.
+
+        This feedback changes no signal, multiplier, risk decision, or order. It
+        only permits a fresh evaluation on a later bar if the regime changes.
+        """
+
+        if decision.status is not ActivationStatus.BLOCK:
+            return
+        signal = next(
+            (item for item in self._signals if item.signal_id == decision.signal_id),
+            None,
+        )
+        if signal is None:
+            return
+        if signal.action is StrategySignalAction.ENTER_LONG:
+            self._entry_submitted.discard(signal.symbol)
+        elif signal.action is StrategySignalAction.EXIT_LONG:
+            self._exit_submitted.discard(signal.symbol)
 
     def _emit_signal(
         self,
@@ -585,3 +608,160 @@ class MomentumStrategy(_FeatureBaseline):
             )
             available_cash -= quantity * current_bar.close
         return tuple(intents)
+
+
+class MeanReversionStrategy(_FeatureBaseline):
+    """Long-only z-score baseline eligible only in a non-HIGH RANGE regime."""
+
+    version = "1.0"
+
+    def __init__(
+        self,
+        symbols: Sequence[str],
+        timeframe: str,
+        config: MeanReversionConfig | None = None,
+        *,
+        feature_engine: FeatureEngine | None = None,
+    ) -> None:
+        super().__init__(feature_engine)
+        self.symbols = _symbols(symbols)
+        if not timeframe.strip():
+            raise ValueError("timeframe must not be empty")
+        self.timeframe = timeframe
+        self.config = config or MeanReversionConfig()
+        self._request = FeatureRequest(
+            sma_windows=(self.config.lookback,),
+            ema_windows=(self.config.lookback,),
+            return_windows=(1,),
+            structure_windows=(self.config.lookback,),
+            efficiency_windows=(self.config.lookback,),
+            zscore_windows=(self.config.lookback,),
+            slope_lookback=1,
+        )
+        self._sizer = BaselineSizer(self.config.allocation_fraction)
+        self._entry_submitted: set[str] = set()
+        self._exit_submitted: set[str] = set()
+
+    @property
+    def name(self) -> str:
+        return "mean-reversion"
+
+    @property
+    def parameters(self) -> tuple[tuple[str, str], ...]:
+        return tuple(
+            sorted(
+                (
+                    *self.config.to_parameters(),
+                    *self._lineage_parameters(self._request),
+                    ("symbols", ",".join(self.symbols)),
+                    ("sizing_policy", "total_fraction_capped_by_profile_exposure"),
+                    ("timeframe", self.timeframe),
+                )
+            )
+        )
+
+    def _reset_state(self) -> None:
+        self._entry_submitted.clear()
+        self._exit_submitted.clear()
+
+    def on_bar(self, context: StrategyContext) -> Sequence[OrderIntent]:
+        bar = context.current_bar
+        if bar.symbol not in self.symbols or bar.timeframe != self.timeframe:
+            return ()
+        position = _position(context, bar.symbol)
+        held = position is not None and position.quantity > Decimal("0")
+        if held:
+            self._entry_submitted.discard(bar.symbol)
+        else:
+            self._exit_submitted.discard(bar.symbol)
+
+        snapshot = self._feature_engine.compute(
+            context.history_for(bar.symbol, self.timeframe), self._request
+        )
+        zscore_name = f"price_zscore_{self.config.lookback}"
+        zscore = snapshot.get(zscore_name)
+        if zscore is None:
+            return ()
+        regime = context.current_regime
+        regime_features = (
+            (
+                ("regime_structure", regime.structure_regime.value),
+                ("regime_volatility", regime.volatility_regime.value),
+            )
+            if regime is not None
+            else (
+                ("regime_structure", "unavailable"),
+                ("regime_volatility", "unavailable"),
+            )
+        )
+        features_used = tuple(
+            sorted(
+                (
+                    (zscore_name, format(zscore, ".15g")),
+                    *regime_features,
+                )
+            )
+        )
+
+        incompatible_structure = (
+            regime is not None
+            and regime.structure_regime is not StructureRegime.RANGE
+        )
+        if held and bar.symbol not in self._exit_submitted and (
+            zscore >= float(self.config.exit_zscore) or incompatible_structure
+        ):
+            reason = (
+                "Mean Reversion exit: structure left RANGE"
+                if incompatible_structure
+                else f"price z-score >= {self.config.exit_zscore}"
+            )
+            signal = self._emit_signal(
+                context,
+                symbol=bar.symbol,
+                action=StrategySignalAction.EXIT_LONG,
+                reason=reason,
+                features_used=features_used,
+            )
+            self._exit_submitted.add(bar.symbol)
+            return (
+                OrderIntent(
+                    symbol=bar.symbol,
+                    side=OrderSide.SELL,
+                    quantity=position.quantity,
+                    order_type=OrderType.MARKET,
+                    timeframe=self.timeframe,
+                    signal_id=signal.signal_id,
+                ),
+            )
+
+        if (
+            not held
+            and zscore <= float(self.config.entry_zscore)
+            and bar.symbol not in self._entry_submitted
+        ):
+            quantity = self._profile_capped_sizer(context, self._sizer).entry_quantity(
+                context.portfolio,
+                bar.close,
+                slots=len(self.symbols),
+            )
+            if quantity is None:
+                return ()
+            signal = self._emit_signal(
+                context,
+                symbol=bar.symbol,
+                action=StrategySignalAction.ENTER_LONG,
+                reason=f"price z-score <= {self.config.entry_zscore}",
+                features_used=features_used,
+            )
+            self._entry_submitted.add(bar.symbol)
+            return (
+                OrderIntent(
+                    symbol=bar.symbol,
+                    side=OrderSide.BUY,
+                    quantity=quantity,
+                    order_type=OrderType.MARKET,
+                    timeframe=self.timeframe,
+                    signal_id=signal.signal_id,
+                ),
+            )
+        return ()

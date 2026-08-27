@@ -13,7 +13,7 @@ from trading_ai.backtesting.reproducibility import to_primitive
 from trading_ai.core.models import BacktestResult
 
 
-RESULT_SCHEMA_VERSION = "1.2"
+RESULT_SCHEMA_VERSION = "1.3"
 _SAFE_RUN_ID = re.compile(r"^[A-Za-z0-9_-]+$")
 _EXPORTED_FILES = frozenset(
     {
@@ -26,9 +26,17 @@ _EXPORTED_FILES = frozenset(
         "ledger.parquet",
         "risk_decisions.parquet",
         "risk_states.parquet",
+        "regime_snapshots.parquet",
+        "regime_transitions.parquet",
+        "activation_decisions.parquet",
     }
 )
-_LOT3_EXPORTED_FILES = _EXPORTED_FILES - {
+_LOT4_EXPORTED_FILES = _EXPORTED_FILES - {
+    "regime_snapshots.parquet",
+    "regime_transitions.parquet",
+    "activation_decisions.parquet",
+}
+_LOT3_EXPORTED_FILES = _LOT4_EXPORTED_FILES - {
     "risk_decisions.parquet",
     "risk_states.parquet",
 }
@@ -163,7 +171,78 @@ class BacktestResultStore:
                 ("completed_at", pa.string()),
                 ("eligible_bar_count", pa.int64()),
                 ("signal_id", pa.string()),
+                ("activation_decision_id", pa.string()),
                 ("risk_decision_id", pa.string()),
+            ]
+        )
+
+    @staticmethod
+    def _regime_snapshot_schema():
+        import pyarrow as pa
+
+        return pa.schema(
+            [
+                ("snapshot_id", pa.string()),
+                ("symbol", pa.string()),
+                ("timestamp", pa.string()),
+                ("timeframe", pa.string()),
+                ("structure_regime", pa.string()),
+                ("volatility_regime", pa.string()),
+                ("detector_name", pa.string()),
+                ("detector_version", pa.string()),
+                ("config_hash", pa.string()),
+                ("bars_in_current_structure_regime", pa.int64()),
+                ("evidence", pa.list_(pa.list_(pa.string(), 2))),
+                ("reason_codes", pa.list_(pa.string())),
+                ("candidate_structure_regime", pa.string()),
+                ("confirmation_progress", pa.int64()),
+                ("transition_from", pa.string()),
+                ("transition_reason", pa.string()),
+            ]
+        )
+
+    @staticmethod
+    def _regime_transition_schema():
+        import pyarrow as pa
+
+        return pa.schema(
+            [
+                ("transition_id", pa.string()),
+                ("symbol", pa.string()),
+                ("timestamp", pa.string()),
+                ("timeframe", pa.string()),
+                ("from_structure", pa.string()),
+                ("to_structure", pa.string()),
+                ("from_volatility", pa.string()),
+                ("to_volatility", pa.string()),
+                ("reason", pa.string()),
+            ]
+        )
+
+    @staticmethod
+    def _activation_decision_schema():
+        import pyarrow as pa
+
+        return pa.schema(
+            [
+                ("decision_id", pa.string()),
+                ("timestamp", pa.string()),
+                ("symbol", pa.string()),
+                ("strategy_name", pa.string()),
+                ("strategy_version", pa.string()),
+                ("signal_id", pa.string()),
+                ("regime_snapshot_id", pa.string()),
+                ("structure_regime", pa.string()),
+                ("volatility_regime", pa.string()),
+                ("status", pa.string()),
+                ("allocation_multiplier", pa.string()),
+                ("proposed_quantity", pa.string()),
+                ("adjusted_quantity", pa.string()),
+                ("reason_codes", pa.list_(pa.string())),
+                ("human_readable_reasons", pa.list_(pa.string())),
+                ("policy_name", pa.string()),
+                ("policy_version", pa.string()),
+                ("policy_config_hash", pa.string()),
             ]
         )
 
@@ -293,6 +372,17 @@ class BacktestResultStore:
                     "config_hash": result.risk_config_hash,
                     "summary": result.risk_summary,
                 },
+                "regime": {
+                    "detector_name": result.regime_detector_name,
+                    "detector_version": result.regime_detector_version,
+                    "config": result.regime_config,
+                    "config_hash": result.regime_config_hash,
+                    "policy_name": result.strategy_policy_name,
+                    "policy_version": result.strategy_policy_version,
+                    "policy_config": result.strategy_policy_config,
+                    "policy_config_hash": result.strategy_policy_config_hash,
+                    "report": result.regime_report,
+                },
                 "counts": {
                     "equity_points": len(result.equity_curve),
                     "orders": len(result.orders),
@@ -302,6 +392,9 @@ class BacktestResultStore:
                     "ledger_entries": len(result.ledger_entries),
                     "risk_decisions": len(result.risk_decisions),
                     "risk_state_transitions": len(result.risk_state_transitions),
+                    "regime_snapshots": len(result.regime_snapshots),
+                    "regime_transitions": len(result.regime_transitions),
+                    "activation_decisions": len(result.activation_decisions),
                 },
             }
         )
@@ -354,6 +447,21 @@ class BacktestResultStore:
                 ),
                 self._risk_state_schema(),
             )
+            self._write_parquet(
+                directory / "regime_snapshots.parquet",
+                (to_primitive(snapshot) for snapshot in result.regime_snapshots),
+                self._regime_snapshot_schema(),
+            )
+            self._write_parquet(
+                directory / "regime_transitions.parquet",
+                (to_primitive(transition) for transition in result.regime_transitions),
+                self._regime_transition_schema(),
+            )
+            self._write_parquet(
+                directory / "activation_decisions.parquet",
+                (to_primitive(decision) for decision in result.activation_decisions),
+                self._activation_decision_schema(),
+            )
             checksums = {
                 name: _sha256_file(directory / name)
                 for name in sorted(_EXPORTED_FILES)
@@ -383,6 +491,7 @@ class BacktestResultStore:
             exported_files = frozenset(payload["files"])
             if exported_files not in {
                 _EXPORTED_FILES,
+                _LOT4_EXPORTED_FILES,
                 _LOT3_EXPORTED_FILES,
                 _LOT2_EXPORTED_FILES,
             }:
@@ -408,6 +517,7 @@ class BacktestResultStore:
             expected_files = {
                 "1.0": _LOT2_EXPORTED_FILES,
                 "1.1": _LOT3_EXPORTED_FILES,
+                "1.2": _LOT4_EXPORTED_FILES,
                 RESULT_SCHEMA_VERSION: _EXPORTED_FILES,
             }.get(summary.get("schema_version"))
             if expected_files is None or exported_files != expected_files:
@@ -428,6 +538,9 @@ class BacktestResultStore:
 
     def inspect(self, run_id: str) -> dict[str, Any]:
         self.verify_integrity(run_id)
-        return json.loads(
+        payload = json.loads(
             (self._directory(run_id) / "summary.json").read_text(encoding="utf-8")
         )
+        if "regime" not in payload:
+            payload["regime"] = {"status": "unavailable"}
+        return payload

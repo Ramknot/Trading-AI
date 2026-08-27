@@ -51,7 +51,10 @@ def test_result_export_writes_json_parquet_and_verifiable_hashes(
     assert parquet.read_table(directory / "ledger.parquet").num_rows == 1
     assert parquet.read_table(directory / "risk_decisions.parquet").num_rows == 1
     assert parquet.read_table(directory / "risk_states.parquet").num_rows == 0
-    assert summary["schema_version"] == "1.2"
+    assert parquet.read_table(directory / "regime_snapshots.parquet").num_rows == 0
+    assert parquet.read_table(directory / "regime_transitions.parquet").num_rows == 0
+    assert parquet.read_table(directory / "activation_decisions.parquet").num_rows == 0
+    assert summary["schema_version"] == "1.3"
     assert summary["risk"]["engine_name"] == "permissive-test-risk"
 
 
@@ -78,6 +81,9 @@ def test_result_store_keeps_lot2_schema_1_0_exports_inspectable(
         "signals.parquet",
         "risk_decisions.parquet",
         "risk_states.parquet",
+        "regime_snapshots.parquet",
+        "regime_transitions.parquet",
+        "activation_decisions.parquet",
     ):
         (directory / name).unlink()
     summary_path = directory / "summary.json"
@@ -86,7 +92,11 @@ def test_result_store_keeps_lot2_schema_1_0_exports_inspectable(
     summary["counts"].pop("signals")
     summary["counts"].pop("risk_decisions")
     summary["counts"].pop("risk_state_transitions")
+    summary["counts"].pop("regime_snapshots")
+    summary["counts"].pop("regime_transitions")
+    summary["counts"].pop("activation_decisions")
     summary.pop("risk")
+    summary.pop("regime")
     summary_path.write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -96,6 +106,9 @@ def test_result_store_keeps_lot2_schema_1_0_exports_inspectable(
         "signals.parquet",
         "risk_decisions.parquet",
         "risk_states.parquet",
+        "regime_snapshots.parquet",
+        "regime_transitions.parquet",
+        "activation_decisions.parquet",
     ):
         checksums["files"].pop(name)
     checksums["files"]["summary.json"] = hashlib.sha256(
@@ -109,6 +122,7 @@ def test_result_store_keeps_lot2_schema_1_0_exports_inspectable(
 
     assert inspected["schema_version"] == "1.0"
     assert "signals" not in inspected["counts"]
+    assert inspected["regime"]["status"] == "unavailable"
 
 
 def test_result_store_keeps_lot3_schema_1_1_exports_inspectable(
@@ -117,20 +131,36 @@ def test_result_store_keeps_lot3_schema_1_1_exports_inspectable(
     result = _result(paper_context)
     store = BacktestResultStore(tmp_path / "backtests")
     directory = store.export(result)
-    for name in ("risk_decisions.parquet", "risk_states.parquet"):
+    for name in (
+        "risk_decisions.parquet",
+        "risk_states.parquet",
+        "regime_snapshots.parquet",
+        "regime_transitions.parquet",
+        "activation_decisions.parquet",
+    ):
         (directory / name).unlink()
     summary_path = directory / "summary.json"
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     summary["schema_version"] = "1.1"
     summary["counts"].pop("risk_decisions")
     summary["counts"].pop("risk_state_transitions")
+    summary["counts"].pop("regime_snapshots")
+    summary["counts"].pop("regime_transitions")
+    summary["counts"].pop("activation_decisions")
     summary.pop("risk")
+    summary.pop("regime")
     summary_path.write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     checksums_path = directory / "checksums.json"
     checksums = json.loads(checksums_path.read_text(encoding="utf-8"))
-    for name in ("risk_decisions.parquet", "risk_states.parquet"):
+    for name in (
+        "risk_decisions.parquet",
+        "risk_states.parquet",
+        "regime_snapshots.parquet",
+        "regime_transitions.parquet",
+        "activation_decisions.parquet",
+    ):
         checksums["files"].pop(name)
     checksums["files"]["summary.json"] = hashlib.sha256(
         summary_path.read_bytes()
@@ -143,6 +173,47 @@ def test_result_store_keeps_lot3_schema_1_1_exports_inspectable(
     assert inspected["schema_version"] == "1.1"
     assert "signals" in inspected["counts"]
     assert "risk" not in inspected
+    assert inspected["regime"]["status"] == "unavailable"
+
+
+def test_result_store_keeps_lot4_schema_1_2_exports_inspectable(
+    tmp_path, paper_context
+) -> None:
+    result = _result(paper_context)
+    store = BacktestResultStore(tmp_path / "backtests")
+    directory = store.export(result)
+    regime_files = (
+        "regime_snapshots.parquet",
+        "regime_transitions.parquet",
+        "activation_decisions.parquet",
+    )
+    for name in regime_files:
+        (directory / name).unlink()
+    summary_path = directory / "summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["schema_version"] = "1.2"
+    summary["counts"].pop("regime_snapshots")
+    summary["counts"].pop("regime_transitions")
+    summary["counts"].pop("activation_decisions")
+    summary.pop("regime")
+    summary_path.write_text(
+        json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    checksums_path = directory / "checksums.json"
+    checksums = json.loads(checksums_path.read_text(encoding="utf-8"))
+    for name in regime_files:
+        checksums["files"].pop(name)
+    checksums["files"]["summary.json"] = hashlib.sha256(
+        summary_path.read_bytes()
+    ).hexdigest()
+    checksums_path.write_text(
+        json.dumps(checksums, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+    inspected = store.inspect(result.run_id)
+    assert inspected["schema_version"] == "1.2"
+    assert "risk" in inspected
+    assert inspected["regime"]["status"] == "unavailable"
 
 
 def test_cached_dataset_adapter_preserves_manifest_and_action_provenance(
@@ -369,5 +440,5 @@ def test_backtest_cli_runs_lot3_trend_from_cache_without_fetching(
     payload = json.loads(capsys.readouterr().out)
 
     assert payload["strategy"] == "trend"
-    assert payload["strategy_parameters"]["feature_schema_version"] == "1.0"
+    assert payload["strategy_parameters"]["feature_schema_version"] == "1.1"
     assert payload["dataset_ids"]

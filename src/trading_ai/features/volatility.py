@@ -39,18 +39,50 @@ def average_true_range_series(
     return tuple(result)
 
 
-def rolling_volatility(values: Sequence[float], window: int) -> float | None:
-    """Sample standard deviation of the latest ``window`` simple returns."""
+def rolling_volatility_series(
+    values: Sequence[float], window: int
+) -> tuple[float | None, ...]:
+    """Sample-volatility series using only returns realized at each point."""
 
     if window < 2:
         raise ValueError("window must be at least 2")
-    if len(values) <= window:
+    result: list[float | None] = [None] * len(values)
+    for end in range(window, len(values)):
+        returns: list[float] = []
+        for index in range(end - window + 1, end + 1):
+            previous = values[index - 1]
+            if previous == 0.0:
+                returns = []
+                break
+            returns.append(values[index] / previous - 1.0)
+        if len(returns) == window:
+            result[end] = stdev(returns)
+    return tuple(result)
+
+
+def rolling_volatility(values: Sequence[float], window: int) -> float | None:
+    """Sample standard deviation of the latest ``window`` simple returns."""
+
+    series = rolling_volatility_series(values, window)
+    return series[-1] if series else None
+
+
+def rolling_percentile(
+    values: Sequence[float | None], window: int
+) -> float | None:
+    """Mid-rank empirical percentile for the latest available observation.
+
+    A complete trailing window of already-observed volatility values is
+    required. Ties receive their midpoint rank, so a constant series is 0.5.
+    """
+
+    if window < 2:
+        raise ValueError("window must be at least 2")
+    available = [value for value in values if value is not None]
+    if len(available) < window:
         return None
-    returns: list[float] = []
-    start = len(values) - window
-    for index in range(start, len(values)):
-        previous = values[index - 1]
-        if previous == 0.0:
-            return None
-        returns.append(values[index] / previous - 1.0)
-    return stdev(returns)
+    sample = available[-window:]
+    current = sample[-1]
+    lower = sum(value < current for value in sample)
+    equal = sum(value == current for value in sample)
+    return (lower + equal / 2.0) / window

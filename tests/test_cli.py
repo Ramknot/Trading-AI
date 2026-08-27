@@ -69,3 +69,36 @@ def test_cli_risk_inspect_does_not_activate_aggressive(capsys) -> None:
     assert payload["profile"] == "aggressive"
     assert payload["enabled"] is False
     assert payload["locked"] is True
+
+
+def test_cli_regime_policy_reports_balanced_matrix_and_hash(capsys) -> None:
+    exit_code = main(["regime", "policy", "--profile", "balanced", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["policy_name"] == "balanced-strategy-policy"
+    assert payload["policy_version"] == "1.0"
+    assert len(payload["config_hash"]) == 64
+    assert payload["structure"]["RANGE"]["breakout"] == {
+        "status": "REDUCE",
+        "multiplier": "0.5",
+    }
+    assert payload["structure"]["RANGE"]["mean-reversion"]["status"] == "ALLOW"
+    assert payload["volatility_overlays"]["HIGH"]["mean-reversion"]["status"] == "BLOCK"
+
+
+def test_cli_regime_policy_keeps_aggressive_locked(capsys) -> None:
+    exit_code = main(["regime", "policy", "--profile", "aggressive", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["enabled"] is False
+    assert payload["locked"] is True
+
+
+def test_cli_strategy_list_includes_mean_reversion(capsys) -> None:
+    assert main(["strategy", "list", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    mean_reversion = next(item for item in payload if item["name"] == "mean-reversion")
+    assert mean_reversion["version"] == "1.0"
+    assert mean_reversion["default_parameters"]["lookback"] == "20"

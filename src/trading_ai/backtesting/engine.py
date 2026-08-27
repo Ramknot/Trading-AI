@@ -62,6 +62,13 @@ from trading_ai.features import FeatureEngine, FeatureRequest
 from trading_ai.risk.base import RiskEngine
 from trading_ai.risk.deny_all import DenyAllRiskEngine
 from trading_ai.risk.models import RiskContext
+from trading_ai.regimes.base import ActivationPolicy, RegimeDetector
+from trading_ai.regimes.models import (
+    ActivationDecision,
+    ActivationStatus,
+    RegimeSnapshot,
+)
+from trading_ai.regimes.reporting import build_regime_report
 
 
 ExecutionModelFactory = Callable[[BacktestConfig], ExecutionModel]
@@ -96,14 +103,22 @@ class BacktestEngine(Backtester):
         metrics_engine: MetricsEngine | None = None,
         risk_engine: RiskEngine | None = None,
         feature_engine: FeatureEngine | None = None,
+        regime_detector: RegimeDetector | None = None,
+        activation_policy: ActivationPolicy | None = None,
         code_version: str | None = None,
     ) -> None:
+        if (regime_detector is None) != (activation_policy is None):
+            raise BacktestConfigurationError(
+                "regime_detector and activation_policy must be injected together"
+            )
         self._execution_model_factory = (
             execution_model_factory or BarExecutionModel
         )
         self._metrics_engine = metrics_engine or MetricsEngine()
         self._risk_engine = risk_engine or DenyAllRiskEngine()
         self._feature_engine = feature_engine or FeatureEngine()
+        self._regime_detector = regime_detector
+        self._activation_policy = activation_policy
         self._code_version = code_version
 
     @property
@@ -183,6 +198,8 @@ class BacktestEngine(Backtester):
         pending_order_ids: list[str] = []
         fills: list[Fill] = []
         risk_decisions: list[RiskDecision] = []
+        regime_snapshots: list[RegimeSnapshot] = []
+        activation_decisions: list[ActivationDecision] = []
         pending_buy_risk: dict[str, tuple[str, Decimal, Decimal]] = {}
         pending_sell_risk: dict[str, tuple[str, Decimal]] = {}
         history: list[MarketBar] = []
@@ -192,9 +209,12 @@ class BacktestEngine(Backtester):
         strategy.reset()
         self._feature_engine.clear_cache()
         self._risk_engine.reset(bars[0].timestamp, config.starting_cash)
+        if self._regime_detector is not None:
+            self._regime_detector.reset()
 
         for timestamp, grouped in groupby(bars, key=lambda bar: bar.timestamp):
             current_bars = tuple(grouped)
+            regimes_at_timestamp: dict[tuple[str, str], RegimeSnapshot] = {}
             while (
                 action_index < len(actions)
                 and actions[action_index].timestamp <= timestamp
@@ -266,6 +286,22 @@ class BacktestEngine(Backtester):
                 self._risk_engine.observe(
                     bar.timestamp, current_portfolio.total_equity
                 )
+                current_regime = None
+                if self._regime_detector is not None:
+                    series_history = tuple(
+                        item
+                        for item in history
+                        if item.symbol == bar.symbol
+                        and item.timeframe == bar.timeframe
+                    )
+                    regime_features = self._feature_engine.compute(
+                        series_history,
+                        self._regime_detector.feature_request,
+                        as_of=bar.timestamp,
+                    )
+                    current_regime = self._regime_detector.evaluate(regime_features)
+                    regime_snapshots.append(current_regime)
+                    regimes_at_timestamp[(bar.symbol, bar.timeframe)] = current_regime
                 strategy_context = StrategyContext(
                     current_time=bar.timestamp,
                     current_bar=bar,
@@ -273,6 +309,8 @@ class BacktestEngine(Backtester):
                     portfolio=current_portfolio,
                     trading_context=context,
                     profile=profile,
+                    current_regime=current_regime,
+                    regime_history=tuple(regime_snapshots),
                 )
                 intents = tuple(strategy.on_bar(strategy_context))
                 for intent in intents:
@@ -288,6 +326,31 @@ class BacktestEngine(Backtester):
                     if (intent.symbol, timeframe) not in available_series:
                         raise BacktestDataError(
                             f"no supplied dataset for order series {intent.symbol} {timeframe}"
+                        )
+                    activation_decision_id = None
+                    if self._activation_policy is not None:
+                        signal = self._signal_for_intent(strategy, intent)
+                        regime = regimes_at_timestamp.get((intent.symbol, timeframe))
+                        if regime is None:
+                            raise BacktestConfigurationError(
+                                "policy-filtered intent requires an exact current regime snapshot"
+                            )
+                        activation = self._activation_policy.evaluate(
+                            strategy_name=strategy.name,
+                            strategy_version=strategy.version,
+                            signal=signal,
+                            regime=regime,
+                            proposed_quantity=intent.quantity,
+                        )
+                        self._validate_activation_decision(intent, signal, activation)
+                        activation_decisions.append(activation)
+                        strategy.on_activation_decision(activation)
+                        activation_decision_id = activation.decision_id
+                        if activation.status is ActivationStatus.BLOCK:
+                            continue
+                        intent = replace(
+                            intent,
+                            quantity=activation.adjusted_quantity,
                         )
                     order_id = f"order-{len(orders) + 1:06d}"
                     observed_price = last_prices.get(intent.symbol)
@@ -315,6 +378,7 @@ class BacktestEngine(Backtester):
                         order_type=intent.order_type,
                         limit_price=intent.limit_price,
                         strategy_decision_id=intent.signal_id,
+                        activation_decision_id=activation_decision_id,
                         created_at=bar.timestamp,
                         expected_entry_price=expected_entry_price,
                         invalidation_price=intent.invalidation_price,
@@ -384,6 +448,7 @@ class BacktestEngine(Backtester):
                             created_at=bar.timestamp,
                             limit_price=intent.limit_price,
                             signal_id=intent.signal_id,
+                            activation_decision_id=activation_decision_id,
                             risk_decision_id=risk_decision.decision_id,
                             status=OrderStatus.REJECTED,
                             status_reason=risk_decision.reason,
@@ -407,6 +472,7 @@ class BacktestEngine(Backtester):
                         created_at=bar.timestamp,
                         limit_price=intent.limit_price,
                         signal_id=intent.signal_id,
+                        activation_decision_id=activation_decision_id,
                         risk_decision_id=risk_decision.decision_id,
                     )
                     order_indexes[order.order_id] = len(orders)
@@ -505,6 +571,62 @@ class BacktestEngine(Backtester):
             raise BacktestConfigurationError(
                 "strategy signal identity or timestamp does not match the run"
             )
+        regime_snapshot_tuple = tuple(regime_snapshots)
+        activation_decision_tuple = tuple(activation_decisions)
+        regime_transition_tuple = (
+            self._regime_detector.transitions
+            if self._regime_detector is not None
+            else ()
+        )
+        regime_report = (
+            build_regime_report(
+                regime_snapshot_tuple,
+                regime_transition_tuple,
+                activation_decision_tuple,
+            )
+            if self._regime_detector is not None
+            else None
+        )
+        regime_detector_name = (
+            self._regime_detector.detector_name
+            if self._regime_detector is not None
+            else "unavailable"
+        )
+        regime_detector_version = (
+            self._regime_detector.detector_version
+            if self._regime_detector is not None
+            else "0"
+        )
+        regime_config = (
+            self._regime_detector.config_parameters
+            if self._regime_detector is not None
+            else ()
+        )
+        regime_config_hash = (
+            self._regime_detector.config_hash
+            if self._regime_detector is not None
+            else "0" * 64
+        )
+        strategy_policy_name = (
+            self._activation_policy.policy_name
+            if self._activation_policy is not None
+            else "unavailable"
+        )
+        strategy_policy_version = (
+            self._activation_policy.policy_version
+            if self._activation_policy is not None
+            else "0"
+        )
+        strategy_policy_config = (
+            self._activation_policy.config_parameters
+            if self._activation_policy is not None
+            else ()
+        )
+        strategy_policy_config_hash = (
+            self._activation_policy.config_hash
+            if self._activation_policy is not None
+            else "0" * 64
+        )
         run_identity = {
             "strategy_name": strategy.name,
             "strategy_version": strategy.version,
@@ -518,6 +640,14 @@ class BacktestEngine(Backtester):
             "risk_engine_version": self._risk_engine.engine_version,
             "risk_config": self._risk_engine.config_parameters,
             "risk_config_hash": self._risk_engine.config_hash,
+            "regime_detector_name": regime_detector_name,
+            "regime_detector_version": regime_detector_version,
+            "regime_config": regime_config,
+            "regime_config_hash": regime_config_hash,
+            "strategy_policy_name": strategy_policy_name,
+            "strategy_policy_version": strategy_policy_version,
+            "strategy_policy_config": strategy_policy_config,
+            "strategy_policy_config_hash": strategy_policy_config_hash,
         }
         run_id = f"bt-{stable_hash(run_identity)[:24]}"
         created_at = datetime.now(timezone.utc)
@@ -552,6 +682,18 @@ class BacktestEngine(Backtester):
             "risk_decisions": risk_decision_tuple,
             "risk_state_transitions": self._risk_engine.state_transitions,
             "risk_summary": risk_summary,
+            "regime_detector_name": regime_detector_name,
+            "regime_detector_version": regime_detector_version,
+            "regime_config": regime_config,
+            "regime_config_hash": regime_config_hash,
+            "strategy_policy_name": strategy_policy_name,
+            "strategy_policy_version": strategy_policy_version,
+            "strategy_policy_config": strategy_policy_config,
+            "strategy_policy_config_hash": strategy_policy_config_hash,
+            "regime_snapshots": regime_snapshot_tuple,
+            "regime_transitions": regime_transition_tuple,
+            "activation_decisions": activation_decision_tuple,
+            "regime_report": regime_report,
         }
         result_values["result_hash"] = stable_result_hash(result_values)
         return BacktestResult(**result_values)
@@ -584,6 +726,49 @@ class BacktestEngine(Backtester):
         ):
             raise BacktestConfigurationError(
                 "RiskEngine may never increase or omit approved quantity"
+            )
+
+    @staticmethod
+    def _signal_for_intent(
+        strategy: BacktestStrategy, intent: OrderIntent
+    ) -> StrategySignal:
+        if intent.signal_id is None:
+            raise BacktestConfigurationError(
+                "policy-filtered strategies must link every intent to a signal"
+            )
+        matches = tuple(
+            signal for signal in strategy.signals if signal.signal_id == intent.signal_id
+        )
+        if len(matches) != 1:
+            raise BacktestConfigurationError(
+                "policy-filtered intent must reference exactly one emitted signal"
+            )
+        return matches[0]
+
+    @staticmethod
+    def _validate_activation_decision(
+        intent: OrderIntent,
+        signal: StrategySignal,
+        decision: ActivationDecision,
+    ) -> None:
+        if not isinstance(decision, ActivationDecision):
+            raise BacktestConfigurationError(
+                "ActivationPolicy must return ActivationDecision"
+            )
+        if decision.signal_id != signal.signal_id:
+            raise BacktestConfigurationError(
+                "ActivationDecision must reference the exact strategy signal"
+            )
+        if decision.proposed_quantity != intent.quantity:
+            raise BacktestConfigurationError(
+                "ActivationDecision must record the exact strategy proposal"
+            )
+        if (
+            decision.allocation_multiplier > Decimal("1")
+            or decision.adjusted_quantity > intent.quantity
+        ):
+            raise BacktestConfigurationError(
+                "ActivationPolicy may never increase the strategy proposal"
             )
 
     @staticmethod

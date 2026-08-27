@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal
 from enum import Enum
+from typing import TYPE_CHECKING
 
 from trading_ai.core.models import (
     MarketBar,
@@ -16,6 +17,9 @@ from trading_ai.core.models import (
     TradingProfile,
 )
 from trading_ai.data.models import CorporateAction, DataQualityReport
+
+if TYPE_CHECKING:
+    from trading_ai.regimes.models import RegimeSnapshot
 
 
 ZERO = Decimal("0")
@@ -350,6 +354,7 @@ class BacktestOrder:
     order_type: OrderType
     created_at: datetime
     signal_id: str | None = None
+    activation_decision_id: str | None = None
     risk_decision_id: str | None = None
     status: OrderStatus = OrderStatus.PENDING
     limit_price: Decimal | None = None
@@ -364,6 +369,8 @@ class BacktestOrder:
         _require_aware(self.created_at, "created_at")
         if self.signal_id is not None:
             _require_text(self.signal_id, "signal_id")
+        if self.activation_decision_id is not None:
+            _require_text(self.activation_decision_id, "activation_decision_id")
         if self.risk_decision_id is not None:
             _require_text(self.risk_decision_id, "risk_decision_id")
         if self.completed_at is not None:
@@ -546,6 +553,8 @@ class StrategyContext:
     portfolio: PortfolioSnapshot
     trading_context: TradingContext
     profile: TradingProfile
+    current_regime: RegimeSnapshot | None = None
+    regime_history: tuple[RegimeSnapshot, ...] = ()
 
     def __post_init__(self) -> None:
         _require_aware(self.current_time, "current_time")
@@ -555,6 +564,18 @@ class StrategyContext:
             raise ValueError("history must end with current_bar")
         if any(bar.timestamp > self.current_time for bar in self.history):
             raise ValueError("strategy history must never contain future bars")
+        if self.current_regime is not None and (
+            self.current_regime.symbol != self.current_bar.symbol
+            or self.current_regime.timeframe != self.current_bar.timeframe
+            or self.current_regime.timestamp != self.current_time
+        ):
+            raise ValueError("current_regime must describe the current bar")
+        if any(item.timestamp > self.current_time for item in self.regime_history):
+            raise ValueError("strategy regime history must never contain future snapshots")
+        if self.current_regime is not None and (
+            not self.regime_history or self.regime_history[-1] != self.current_regime
+        ):
+            raise ValueError("regime_history must end with current_regime")
 
     def history_for(
         self, symbol: str, timeframe: str | None = None
@@ -564,4 +585,14 @@ class StrategyContext:
             for bar in self.history
             if bar.symbol == symbol
             and (timeframe is None or bar.timeframe == timeframe)
+        )
+
+    def regime_history_for(
+        self, symbol: str, timeframe: str | None = None
+    ) -> tuple[RegimeSnapshot, ...]:
+        return tuple(
+            snapshot
+            for snapshot in self.regime_history
+            if snapshot.symbol == symbol
+            and (timeframe is None or snapshot.timeframe == timeframe)
         )

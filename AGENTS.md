@@ -40,7 +40,7 @@ These rules apply to Codex and every future development agent working in this re
 - A feature value at time `t` must remain unchanged if future data is appended.
 - Baseline strategy parameters must not be tuned solely to maximize historical performance.
 - Strategies must use shared `FeatureEngine` definitions instead of reimplementing indicators independently.
-- Mean Reversion is reserved for the Regime Detector lot.
+- Mean Reversion may open new positions only in an eligible `RANGE` regime.
 - Machine learning must not be introduced before the dedicated ML lot.
 - Strategy defaults are research baselines, not optimized parameters.
 - The Risk Engine must never increase a requested position size.
@@ -54,4 +54,14 @@ These rules apply to Codex and every future development agent working in this re
 - Circuit breakers must stop new risk, not silently liquidate portfolios.
 - Every approved simulated order must reference an immutable `RiskDecision`.
 - Pending orders must reserve their risk capacity so concurrent intents cannot reuse cash, exposure, or exit quantity.
+- Market structure and volatility must be modeled as separate regime dimensions.
+- Regime classification at time `t` must never depend on future bars.
+- `UNKNOWN` must remain a valid conservative regime and must not be silently mapped to `RANGE`.
+- `StrategyActivationPolicy` must never increase allocation above the strategy proposal.
+- Strategy exits must not be blocked by regime policy.
+- `BalancedRiskEngine` remains sovereign after regime filtering.
+- Regime policy must not optimize or choose strategies based on historical profitability.
+- Mean Reversion must not average down or use martingale sizing.
+- The Lot 5 Regime Detector must remain deterministic and must not introduce machine learning.
+- Regime modules must not contact data providers or brokers.
 - Update `PROJECT_STATE.md` when a lot changes state.

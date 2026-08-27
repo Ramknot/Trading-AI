@@ -51,7 +51,10 @@ def test_baselines_use_shared_feature_engine_and_have_no_external_execution_path
     assert not any(name.startswith("trading_ai.brokers") for name in imports)
     assert not any(name.startswith("trading_ai.execution") for name in imports)
     assert not any(name.startswith("trading_ai.ml") for name in imports)
-    assert not any(name.startswith("trading_ai.regimes") for name in imports)
+    regime_imports = {
+        name for name in imports if name.startswith("trading_ai.regimes")
+    }
+    assert regime_imports <= {"trading_ai.regimes.models"}
     assert not any(name in {"yfinance", "pandas", "sklearn"} for name in imports)
     assert all(
         strategy_class.__module__ == "trading_ai.strategies.baselines"

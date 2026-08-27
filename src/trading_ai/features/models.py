@@ -7,8 +7,8 @@ from datetime import datetime
 from math import isfinite
 
 
-FEATURE_SCHEMA_VERSION = "1.0"
-FEATURE_ENGINE_VERSION = "1.0"
+FEATURE_SCHEMA_VERSION = "1.1"
+FEATURE_ENGINE_VERSION = "1.1"
 
 
 def _normalized_windows(values: tuple[int, ...], field_name: str) -> tuple[int, ...]:
@@ -32,9 +32,12 @@ class FeatureRequest:
     ema_windows: tuple[int, ...] = (20, 50)
     return_windows: tuple[int, ...] = (1, 20, 60)
     structure_windows: tuple[int, ...] = (20,)
+    efficiency_windows: tuple[int, ...] = (20,)
+    zscore_windows: tuple[int, ...] = (20,)
     slope_lookback: int = 5
     atr_window: int = 14
     volatility_window: int = 20
+    volatility_percentile_window: int = 100
     volume_window: int = 20
 
     def __post_init__(self) -> None:
@@ -43,6 +46,8 @@ class FeatureRequest:
             "ema_windows",
             "return_windows",
             "structure_windows",
+            "efficiency_windows",
+            "zscore_windows",
         ):
             object.__setattr__(
                 self,
@@ -53,6 +58,7 @@ class FeatureRequest:
             "slope_lookback",
             "atr_window",
             "volatility_window",
+            "volatility_percentile_window",
             "volume_window",
         ):
             value = getattr(self, field_name)
@@ -60,6 +66,8 @@ class FeatureRequest:
                 raise ValueError(f"{field_name} must be a positive integer")
         if self.volatility_window < 2:
             raise ValueError("volatility_window must be at least 2")
+        if self.volatility_percentile_window < 2:
+            raise ValueError("volatility_percentile_window must be at least 2")
 
     def to_parameters(self) -> tuple[tuple[str, str], ...]:
         """Return stable metadata suitable for backtest lineage."""
@@ -69,6 +77,10 @@ class FeatureRequest:
                 (
                     ("atr_window", str(self.atr_window)),
                     ("ema_windows", ",".join(map(str, self.ema_windows))),
+                    (
+                        "efficiency_windows",
+                        ",".join(map(str, self.efficiency_windows)),
+                    ),
                     ("return_windows", ",".join(map(str, self.return_windows))),
                     ("slope_lookback", str(self.slope_lookback)),
                     ("sma_windows", ",".join(map(str, self.sma_windows))),
@@ -77,10 +89,16 @@ class FeatureRequest:
                         ",".join(map(str, self.structure_windows)),
                     ),
                     ("volatility_window", str(self.volatility_window)),
+                    (
+                        "volatility_percentile_window",
+                        str(self.volatility_percentile_window),
+                    ),
                     ("volume_window", str(self.volume_window)),
+                    ("zscore_windows", ",".join(map(str, self.zscore_windows))),
                 )
             )
         )
+
 
 @dataclass(frozen=True, slots=True)
 class FeatureValue:

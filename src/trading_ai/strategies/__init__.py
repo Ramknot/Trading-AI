@@ -3,11 +3,13 @@
 from trading_ai.strategies.base import Strategy
 from trading_ai.strategies.baselines import (
     BreakoutStrategy,
+    MeanReversionStrategy,
     MomentumStrategy,
     TrendFollowingStrategy,
 )
 from trading_ai.strategies.config import (
     BreakoutConfig,
+    MeanReversionConfig,
     MomentumConfig,
     TrendConfig,
 )
@@ -24,6 +26,8 @@ __all__ = [
     "BaselineSizer",
     "BreakoutConfig",
     "BreakoutStrategy",
+    "MeanReversionConfig",
+    "MeanReversionStrategy",
     "MomentumConfig",
     "MomentumStrategy",
     "Strategy",

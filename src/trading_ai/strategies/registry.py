@@ -9,17 +9,21 @@ from typing import TypeAlias
 from trading_ai.backtesting.strategy import BacktestStrategy
 from trading_ai.strategies.baselines import (
     BreakoutStrategy,
+    MeanReversionStrategy,
     MomentumStrategy,
     TrendFollowingStrategy,
 )
 from trading_ai.strategies.config import (
     BreakoutConfig,
+    MeanReversionConfig,
     MomentumConfig,
     TrendConfig,
 )
 
 
-BaselineConfig: TypeAlias = TrendConfig | MomentumConfig | BreakoutConfig
+BaselineConfig: TypeAlias = (
+    TrendConfig | MomentumConfig | BreakoutConfig | MeanReversionConfig
+)
 StrategyFactory: TypeAlias = Callable[
     [Sequence[str], str, BaselineConfig | None], BacktestStrategy
 ]
@@ -55,6 +59,14 @@ def _breakout_factory(
     if config is not None and not isinstance(config, BreakoutConfig):
         raise TypeError("breakout requires BreakoutConfig")
     return BreakoutStrategy(symbols, timeframe, config)
+
+
+def _mean_reversion_factory(
+    symbols: Sequence[str], timeframe: str, config: BaselineConfig | None
+) -> BacktestStrategy:
+    if config is not None and not isinstance(config, MeanReversionConfig):
+        raise TypeError("mean-reversion requires MeanReversionConfig")
+    return MeanReversionStrategy(symbols, timeframe, config)
 
 
 class StrategyRegistry:
@@ -121,6 +133,15 @@ def _default_registry() -> StrategyRegistry:
             default_parameters=BreakoutConfig().to_parameters(),
         ),
         _breakout_factory,
+    )
+    registry.register(
+        StrategyDescriptor(
+            name="mean-reversion",
+            version=MeanReversionStrategy.version,
+            description="Range-only long z-score mean reversion",
+            default_parameters=MeanReversionConfig().to_parameters(),
+        ),
+        _mean_reversion_factory,
     )
     return registry
 

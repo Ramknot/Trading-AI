@@ -99,3 +99,35 @@ class BreakoutConfig:
                 )
             )
         )
+
+
+@dataclass(frozen=True, slots=True)
+class MeanReversionConfig:
+    """Long-only range baseline; defaults are research references only."""
+
+    lookback: int = 20
+    entry_zscore: Decimal = Decimal("-1.5")
+    exit_zscore: Decimal = Decimal("-0.25")
+    allocation_fraction: Decimal = Decimal("0.20")
+
+    def __post_init__(self) -> None:
+        _positive_integer(self.lookback, "lookback")
+        if self.lookback < 2:
+            raise ValueError("lookback must be at least 2")
+        if not self.entry_zscore.is_finite() or not self.exit_zscore.is_finite():
+            raise ValueError("z-score thresholds must be finite")
+        if self.entry_zscore >= self.exit_zscore:
+            raise ValueError("entry_zscore must be below exit_zscore")
+        _fraction(self.allocation_fraction, "allocation_fraction")
+
+    def to_parameters(self) -> tuple[tuple[str, str], ...]:
+        return tuple(
+            sorted(
+                (
+                    ("allocation_fraction", str(self.allocation_fraction)),
+                    ("entry_zscore", str(self.entry_zscore)),
+                    ("exit_zscore", str(self.exit_zscore)),
+                    ("lookback", str(self.lookback)),
+                )
+            )
+        )

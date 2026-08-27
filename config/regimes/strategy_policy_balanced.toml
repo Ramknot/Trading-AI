@@ -1,0 +1,31 @@
+name = "balanced"
+enabled = true
+policy_name = "balanced-strategy-policy"
+policy_version = "1.0"
+
+[structure.TREND_UP]
+trend = { status = "ALLOW", multiplier = 1.0 }
+momentum = { status = "ALLOW", multiplier = 1.0 }
+breakout = { status = "ALLOW", multiplier = 1.0 }
+"mean-reversion" = { status = "BLOCK", multiplier = 0.0 }
+
+[structure.RANGE]
+trend = { status = "BLOCK", multiplier = 0.0 }
+momentum = { status = "BLOCK", multiplier = 0.0 }
+breakout = { status = "REDUCE", multiplier = 0.50 }
+"mean-reversion" = { status = "ALLOW", multiplier = 1.0 }
+
+[structure.TREND_DOWN]
+trend = { status = "BLOCK", multiplier = 0.0 }
+momentum = { status = "BLOCK", multiplier = 0.0 }
+breakout = { status = "BLOCK", multiplier = 0.0 }
+"mean-reversion" = { status = "BLOCK", multiplier = 0.0 }
+
+[structure.UNKNOWN]
+trend = { status = "BLOCK", multiplier = 0.0 }
+momentum = { status = "BLOCK", multiplier = 0.0 }
+breakout = { status = "BLOCK", multiplier = 0.0 }
+"mean-reversion" = { status = "BLOCK", multiplier = 0.0 }
+
+[volatility.HIGH]
+"mean-reversion" = { status = "BLOCK", multiplier = 0.0 }

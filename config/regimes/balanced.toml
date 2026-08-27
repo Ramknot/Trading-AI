@@ -1,0 +1,22 @@
+name = "balanced"
+enabled = true
+detector_name = "balanced-regime"
+detector_version = "1.0"
+
+fast_ema_window = 20
+slow_ema_window = 50
+slope_lookback = 5
+efficiency_window = 20
+trend_efficiency_threshold = 0.35
+range_efficiency_threshold = 0.20
+min_trend_separation = 0.005
+max_range_separation = 0.003
+max_range_price_distance = 0.020
+min_normalized_slope = 0.0001
+
+volatility_window = 20
+volatility_percentile_window = 100
+low_volatility_percentile = 0.20
+high_volatility_percentile = 0.80
+
+confirmation_bars = 3

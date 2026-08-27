@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from decimal import Decimal
-from typing import Sequence
+from typing import TYPE_CHECKING, Sequence
 
 from trading_ai.backtesting.models import OrderIntent, StrategyContext, StrategySignal
 from trading_ai.core.models import OrderSide, OrderType
+
+if TYPE_CHECKING:
+    from trading_ai.regimes.models import ActivationDecision
 
 
 class BacktestStrategy(ABC):
@@ -36,6 +39,11 @@ class BacktestStrategy(ABC):
         """Explainable signals emitted during the current deterministic run."""
 
         return ()
+
+    def on_activation_decision(self, decision: ActivationDecision) -> None:
+        """Observe policy outcome only to maintain deterministic proposal state."""
+
+        del decision
 
     @abstractmethod
     def on_bar(self, context: StrategyContext) -> Sequence[OrderIntent]:

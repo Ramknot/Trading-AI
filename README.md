@@ -1,6 +1,6 @@
 # Trading AI
 
-Trading AI is a safety-first, modular Python project for reproducible market research, paper trading, and future controlled execution. Lot 4 adds a deterministic Balanced Risk Engine to the foundations, market-data pipeline, Backtesting Engine, shared Feature Engine, and explainable quantitative baselines delivered in Lots 0 through 3. It does not add optimization, regime classification, machine learning, portfolio optimization, broker integration, or any real-order path.
+Trading AI is a safety-first, modular Python project for reproducible market research, paper trading, and future controlled execution. Lot 5 adds a deterministic two-axis Regime Detector, configuration-driven Strategy Activation Policy, and long-only Mean Reversion research baseline to the foundations, data, feature, backtesting, quantitative baseline, and Balanced risk layers delivered in Lots 0 through 4. It does not add machine learning, portfolio optimization, broker integration, or any real-order path.
 
 ## Safety guarantees
 
@@ -17,6 +17,7 @@ These are architectural safeguards, not a claim that trading systems or market d
 
 ```text
 config/profiles/                  configurable profiles and market universes
+config/regimes/                   Balanced detector/policy TOML; Aggressive locked
 src/trading_ai/core/              models, configuration, safety policy, health, logging
 src/trading_ai/data/
   base.py                         provider-neutral DataProvider contract
@@ -28,7 +29,8 @@ src/trading_ai/data/
   providers/fake.py               deterministic offline test provider
   providers/yahoo.py              development historical-data adapter
 src/trading_ai/features/          shared trend, momentum, volatility, volume, structure features
-src/trading_ai/strategies/        contracts, configs, sizing, registry, and Lot 3 baselines
+src/trading_ai/regimes/           two-axis detector, confirmation, policy, reporting
+src/trading_ai/strategies/        configs, sizing, registry, and four research baselines
 src/trading_ai/ml/                MLScorer contract only
 src/trading_ai/portfolio/         PortfolioEngine contract only
 src/trading_ai/risk/              mandatory gate, Balanced limits/state/guards/reporting
@@ -61,7 +63,9 @@ The historical-simulation flow is separate from both providers and brokers:
 ```text
 DataEngine -> validated BacktestDataset -> BacktestEngine
                                            |-> FeatureEngine (past + present only)
+                                           |-> BalancedRegimeDetector
                                            |-> BacktestStrategy (feature snapshots/signals)
+                                           |-> StrategyActivationPolicy (<= 1.0)
                                            |-> BalancedRiskEngine (explicit)
                                            |-> ExecutionModel (risk-approved orders only)
                                            |-> PortfolioLedger
@@ -81,7 +85,7 @@ python -m venv .venv
 .\.venv\Scripts\python -m pip install -e ".[dev]"
 ```
 
-Runtime dependencies remain deliberately limited to the Lot 1 set: `pandas`, `pyarrow`, `yfinance`, and `pandas-market-calendars`. Lots 2, 3, and 4 add no dependency or external backtesting, indicator, or risk framework; features, risk controls, and numerical metrics use the Python standard library. `pytest` is the development dependency. Yahoo Finance is a development/research source, not a guaranteed production or live-trading feed.
+Runtime dependencies remain deliberately limited to the Lot 1 set: `pandas`, `pyarrow`, `yfinance`, and `pandas-market-calendars`. Lots 2 through 5 add no dependency or external backtesting, indicator, risk, regime, or ML framework; features, risk/regime controls, and numerical metrics use the Python standard library. `pytest` is the development dependency. Yahoo Finance is a development/research source, not a guaranteed production or live-trading feed.
 
 ## Data Engine
 
@@ -173,7 +177,7 @@ The optional `BuyAndHoldBenchmark` is a dedicated benchmark component, not an op
 
 ### Provenance, reproducibility, and exports
 
-Every `BacktestResult` records strategy name/version/parameters, feature schema/engine lineage, exact dataset IDs and SHA-256 checksums, corporate-action lineage, simulation config, risk engine/version/config/hash, every risk decision/state transition, historical start/end, optional Git commit SHA, a SHA-256 of the current Python source tree, explainable signals, orders, fills, trades, ledger entries, warnings, benchmark, and a stable run/result hash. The source hash makes an uncommitted/dirty run distinguishable even when `HEAD` still names an older commit. Technical creation time is excluded from the deterministic hash, so identical strategy, feature, risk, source/code, simulation, and dataset inputs produce identical decisions, orders, fills, metrics, run ID, and result hash.
+Every `BacktestResult` records strategy name/version/parameters, feature schema/engine lineage, exact dataset IDs and SHA-256 checksums, corporate-action lineage, simulation config, regime detector/version/config/hash, policy/version/config/hash, snapshots/transitions/activation decisions, risk engine/version/config/hash, every risk decision/state transition, historical start/end, optional Git commit SHA, a SHA-256 of the current Python source tree, explainable signals, orders, fills, trades, ledger entries, warnings, benchmark, and a stable run/result hash. The source hash makes an uncommitted/dirty run distinguishable even when `HEAD` still names an older commit. Technical creation time is excluded from the deterministic hash, so identical data, features, regimes, policy, strategy, risk, source, and simulation inputs produce identical decisions, fills, metrics, run ID, and result hash.
 
 Exports stay below the Git-ignored local tree:
 
@@ -188,6 +192,9 @@ data_local/backtests/<run_id>/
   ledger.parquet
   risk_decisions.parquet
   risk_states.parquet
+  regime_snapshots.parquet
+  regime_transitions.parquet
+  activation_decisions.parquet
   checksums.json
 ```
 
@@ -201,35 +208,80 @@ Lot 2 deliberately has no strategy parameter optimization, grid search, walk-for
 
 ### Shared feature definitions
 
-`FeatureEngine` is the only Lot 3 source of quantitative calculations. It accepts one immutable, normalized symbol/timeframe history and returns an immutable `FeatureSnapshot` for its latest observable bar. Stable feature names and `feature_schema_version = 1.0` make the definitions traceable for strategies and future regime/ML lots. The current definitions are:
+`FeatureEngine` is the shared source of quantitative calculations. It accepts one immutable, normalized symbol/timeframe history and returns an immutable `FeatureSnapshot` for its latest observable bar. Lot 5 extends the schema additively to `feature_schema_version = 1.1`; all Lot 3 definitions retain their meaning. Stable names make every value traceable for strategies, regimes, risk controls, and the future ML lot. The definitions are:
 
 - Trend: `sma_N`, `ema_N`, per-bar moving-average slope over a configured lookback, and decimal price-to-average distance.
 - Momentum: one-bar simple return, `return_N` as a decimal rolling return, `roc_N` as the percentage equivalent, plus exact-timestamp cross-sectional rank and percentile.
 - Volatility: true range, Wilder ATR seeded after a full window, and sample rolling volatility of simple returns.
 - Volume: rolling mean volume and current volume divided by that mean. A zero mean produces unavailable data, never infinity.
 - Structure: `previous_high_N`, `previous_low_N`, and price distance to each level. The reference range explicitly excludes the current bar.
+- Lot 5 structure: `efficiency_ratio_N`, direction divided by total absolute price path over `N` changes. A flat denominator is unavailable.
+- Lot 5 context: `volatility_percentile_V_P`, the midpoint empirical rank of current rolling volatility `V` within the latest `P` already-observed volatility values.
+- Lot 5 Mean Reversion: `price_zscore_N`, using the current close, full-window mean, and population standard deviation. Zero standard deviation is unavailable.
 
 All windows are counts of bars, not days: `20` means 20 bars for `1h`, `4h`, or `1d`. Warm-up values remain `None`; they are never backfilled, extrapolated, or replaced with partial-window estimates. Strategy-required features must all be available before an order can be proposed. The bounded Feature Engine cache reuses only exact immutable inputs.
 
 ### Anti-look-ahead rule
 
-A feature at time `t` uses only bars with timestamps less than or equal to `t`. Supplying a later history with `as_of=t` filters every later bar before calculation, and tests assert that appending future data cannot change SMA/EMA, momentum, ATR, or prior-range levels at `t`. Strategies still receive the Lot 2 `StrategyContext`; no full future DataFrame, `next_close`, or negative-future shift is exposed.
+A feature at time `t` uses only bars with timestamps less than or equal to `t`. Supplying a later history with `as_of=t` filters every later bar before calculation, and tests assert that appending future data cannot change SMA/EMA, momentum, ATR, prior-range levels, Efficiency Ratio, volatility percentile, or price z-score at `t`. Strategies still receive the Lot 2 `StrategyContext`; no full future DataFrame, `next_close`, centered window, or negative-future shift is exposed.
 
 Cross-sectional relative strength uses only assets that have a real bar at exactly the same UTC timestamp. Missing Europe/US observations are reported and the baseline skips that snapshot; it never forward-fills one market into another. This strict policy is safe but means mixed-calendar datasets may have few or no coherent ranking points until a future explicit decision-calendar policy is designed.
 
 ### Research baselines
 
-The production research registry exposes three versioned long-only baselines. Their immutable defaults are reference values, not optimized parameters:
+The production research registry exposes four versioned long-only baselines. Their immutable defaults are reference values, not optimized parameters:
 
 - `trend` (`1.0`): enter when EMA 20 is above EMA 50, close is above EMA 50, and the five-bar fast-EMA slope is positive; exit when EMA 20 is no longer above EMA 50. Default allocation fraction: 25%.
 - `momentum` (`1.0`): rank exact-common-timestamp 20-bar returns, select up to the positive top 3, and reconsider the selection every five coherent bars. Default total allocation fraction: 60%, divided equally across new targets.
 - `breakout` (`1.0`): enter when close exceeds the previous 20-bar high and exit when close falls below the previous 10-bar low. Current-bar highs/lows never define their own trigger. Default allocation fraction: 25%.
+- `mean-reversion` (`1.0`): propose an entry when `price_zscore_20 <= -1.5`; the activation policy permits that proposal only in an eligible `RANGE` and outside `HIGH` volatility. Exit at `price_zscore_20 >= -0.25` or when structure leaves `RANGE`. Default allocation fraction: 20%. It is long-only, never averages down, and has no martingale path.
 
 Every ENTER/EXIT signal stores strategy/version, UTC timestamp, reason, strength, and exact feature values; simulated orders reference the originating signal ID. No opaque BUY/SELL action is generated. `BaselineSizer` provides only temporary total-allocation/fractional-share proposals for these research runs. It is deliberately not named or treated as `PortfolioEngine`: **BaselineSizer proposes; RiskEngine disposes**. The Risk Engine may preserve, reduce, or reject that quantity and can never increase it; the ledger remains an independent cash/no-leverage/no-short backstop.
 
 `StrategyReport` exposes strategy parameters, trades, return, drawdown, Sharpe, turnover, benchmark return, and excess return. Multi-report comparison preserves the requested order and never declares an automatic winner. Turnover remains an observed metric, not an optimization objective.
 
-The Lot 3 strategies are research baselines, not claims of profitable trading systems. No parameter sweep, hidden winner selection, ML, or regime detector is present. Mean Reversion is intentionally reserved for Lot 5 so it can later be conditioned on an explicit regime policy. A present-day configured universe is not point-in-time, so future results can retain survivorship bias.
+The strategies are research baselines, not claims of profitable trading systems. No parameter sweep, hidden winner selection, performance-driven activation, or ML is present. A present-day configured universe is not point-in-time, so future results can retain survivorship bias.
+
+## Regime Detector & Strategy Activation
+
+### Two independent axes
+
+`BalancedRegimeDetector` (`balanced-regime`, version `1.0`) describes context and never emits a signal or order. Structure and volatility are intentionally separate dimensions:
+
+- `StructureRegime`: `TREND_UP`, `TREND_DOWN`, `RANGE`, or conservative `UNKNOWN`.
+- `VolatilityRegime`: `LOW`, `NORMAL`, `HIGH`, or `UNKNOWN` during percentile warm-up.
+
+Combinations such as `TREND_UP + HIGH` are valid. The structure candidate combines shared EMA 20/50 ordering, normalized EMA slope, price-to-slow-EMA distance, EMA separation, and `efficiency_ratio_20`. `RANGE` requires low efficiency, contained EMA separation, and contained price distance. Missing critical evidence, conflicting rules, or insufficient history produces `UNKNOWN`; it is never silently converted to `RANGE`.
+
+Structure changes require three consecutive candidate bars by default. Until confirmation, `RegimeSnapshot` retains the current structure plus the candidate and confirmation progress. Confirmed changes create a single immutable `RegimeTransition`. Volatility classification independently uses `volatility_percentile_20_100`: at or below 0.20 is `LOW`, at or above 0.80 is `HIGH`, and the interval is `NORMAL`. Windows are bar counts and all thresholds are configurable, deterministic research defaults—not optimized values or probabilities.
+
+### Balanced activation matrix
+
+`BalancedStrategyActivationPolicy` (`balanced-strategy-policy`, version `1.0`) maps a strategy signal and current `RegimeSnapshot` to immutable `ALLOW`, `REDUCE`, or `BLOCK`. Its multiplier is always in `[0, 1]`; it cannot increase the strategy proposal.
+
+| Structure | Trend | Momentum | Breakout | Mean Reversion |
+| --- | --- | --- | --- | --- |
+| `TREND_UP` | ALLOW 1.0 | ALLOW 1.0 | ALLOW 1.0 | BLOCK |
+| `RANGE` | BLOCK | BLOCK | REDUCE 0.50 | ALLOW 1.0 |
+| `TREND_DOWN` | BLOCK | BLOCK | BLOCK | BLOCK |
+| `UNKNOWN` | BLOCK | BLOCK | BLOCK | BLOCK |
+
+The sole V1 volatility overlay blocks new Mean Reversion entries in `HIGH` volatility. Trend, Momentum, and Breakout are not reduced a second time by this contextual label; the independent Lot 4 `VolatilityGuard` remains responsible for risk sizing. Every `EXIT_LONG` is allowed by policy in every regime, including `UNKNOWN`, `TREND_DOWN`, and `HIGH` volatility.
+
+Quantity authority remains ordered and monotonic:
+
+```text
+BaselineSizer proposal
+  -> activation multiplier <= 1
+  -> BalancedRiskEngine approved quantity <= adjusted proposal
+  -> next-bar simulated execution
+```
+
+A blocked activation never becomes a new-risk request. An allowed activation can still be rejected by a `HALTED` Risk Engine. Each result preserves `dataset -> features -> regime snapshot -> signal -> activation decision -> order -> risk decision -> fill` lineage, hashes both TOML configurations, and exports schema `1.3` regime/activation Parquet files with SHA-256 checksums. Older schema `1.0`, `1.1`, and `1.2` runs remain inspectable with regime data reported as unavailable.
+
+Mixed US/European calendars are not forward-filled. Each symbol receives its own point-in-time regime, while Momentum continues to rank only exact-common UTC observations. This conservative rule can reduce the number of mixed-market ranking opportunities.
+
+Regime classification is a research abstraction, not a prediction of future market behaviour. Strategy eligibility does not override the Risk Engine and does not guarantee profitability.
 
 ## Balanced Risk Engine
 
@@ -282,7 +334,7 @@ Concentration groups and limits are configuration-driven. An unknown group is ex
 
 Every decision records its stable ID, order ID, engine/version, status, requested/approved quantity, reason codes and explanations, state, configuration SHA-256, cash/equity, before/after exposures, loss/drawdown, and available volatility/correlation metrics. Orders retain both `signal_id` and `risk_decision_id`, producing `Signal -> Order -> RiskDecision -> Fill` lineage. The result summary includes approved/reduced/rejected counts, rejection reasons, maximum observed exposures/drawdown/daily loss, and time in protected states. Schema `1.2` exports decisions and transitions to Parquet with checksums; inspection remains compatible with Lot 2 schema `1.0` and Lot 3 schema `1.1` exports.
 
-Lot 4 remains offline and simulated. It has no FX conversion, real broker state reconciliation, order-book/liquidity impact, portfolio optimizer, automatic liquidation, regime conditioning, or proof that its limits are sufficient for live markets.
+The risk layer remains offline and simulated. It has no FX conversion, real broker state reconciliation, order-book/liquidity impact, portfolio optimizer, automatic liquidation, or proof that its limits are sufficient for live markets. Regime classification remains a separate upstream context layer and never changes Risk Engine sovereignty.
 
 ## CLI
 
@@ -292,9 +344,20 @@ Safety diagnostics remain available:
 trading-ai doctor
 trading-ai doctor --environment PAPER --profile balanced --json
 trading-ai risk inspect --profile balanced --json
+trading-ai regime policy --profile balanced --json
 ```
 
 `risk inspect` validates and displays engine/version, limits, drawdown/daily-loss rules, volatility/correlation policies, concentration groups, and the deterministic config hash. Inspecting `aggressive` reports it as locked and disabled; it does not activate it.
+
+Regime commands read local Parquet datasets only and never fetch missing data:
+
+```powershell
+trading-ai regime inspect --profile balanced --symbol SPY --timeframe 1d --start 2024-01-01 --end 2025-01-01 --json
+trading-ai regime latest --profile balanced --symbol SPY --timeframe 1d --json
+trading-ai regime policy --profile balanced --json
+```
+
+`inspect` reports the latest two-axis snapshot, evidence, confirmation progress, transitions, time by regime, exact dataset ID/checksum, and detector/config provenance. `latest` resolves the latest local manifest. `policy` displays the TOML-driven structure matrix and volatility overlays. Aggressive detector and policy schemas exist but remain disabled and cannot be activated.
 
 Historical-data commands are explicit; no command downloads the full universe unless `--all` is supplied:
 
@@ -315,15 +378,16 @@ trading-ai backtest run --strategy buy-and-hold --symbol SPY --timeframe 1d --st
 trading-ai backtest run --strategy trend --symbol SPY --timeframe 1d --start 2024-01-01 --end 2025-01-01 --spread-bps 5 --slippage-bps 5 --commission-fixed 1 --json
 trading-ai backtest run --strategy momentum --symbol SPY --symbol QQQ --symbol IWM --timeframe 1d --start 2024-01-01 --end 2025-01-01 --top-k 2 --rebalance-every 5 --spread-bps 5 --slippage-bps 5 --commission-fixed 1 --json
 trading-ai backtest run --strategy breakout --symbol AAPL --timeframe 4h --start 2024-06-01 --end 2024-07-01 --entry-window 20 --exit-window 10 --spread-bps 5 --slippage-bps 5 --commission-fixed 1 --json
+trading-ai backtest run --strategy mean-reversion --symbol SPY --timeframe 1d --start 2024-01-01 --end 2025-01-01 --mean-reversion-lookback 20 --entry-zscore -1.5 --exit-zscore -0.25 --spread-bps 5 --slippage-bps 5 --commission-fixed 1 --json
 trading-ai backtest inspect --run-id bt-0123456789abcdef01234567 --json
 trading-ai strategy list --json
 ```
 
-The demo submits one buy intent. Every CLI backtest explicitly uses `BalancedRiskEngine`; a missing/invalid risk configuration fails closed. Every command uses the first selected symbol as its configurable Buy & Hold benchmark unless `--benchmark-symbol` names another cached profile symbol. Strategy-specific window/allocation flags override immutable defaults for that run, and the resolved values are stored in `BacktestResult`. `run` exports under `data_local/backtests/`; `inspect` verifies checksums and includes the risk summary before reading the result. A cache miss fails clearly without falling back to Yahoo Finance.
+The demo submits one buy intent. Every quantitative baseline CLI run explicitly injects `BalancedRegimeDetector`, `BalancedStrategyActivationPolicy`, and `BalancedRiskEngine`; there is no CLI flag to bypass regime eligibility or risk. A missing/invalid configuration fails closed. Every command uses the first selected symbol as its configurable Buy & Hold benchmark unless `--benchmark-symbol` names another cached profile symbol. Strategy-specific window/allocation flags override immutable defaults for that run, and the resolved values are stored in `BacktestResult`. `run` exports under `data_local/backtests/`; `inspect` verifies checksums and includes regime/policy and risk summaries. A cache miss fails clearly without falling back to Yahoo Finance.
 
 ## Tests and CI
 
-The default suite is deterministic, fast, and independent of Yahoo Finance and the network. It uses `FakeDataProvider` plus small synthetic sessions, invalid bars, gaps, corporate actions, feature warm-ups, future-append invariance, relative-strength ties/missing assets, all three baselines, execution costs, partial exits, known metric curves, look-ahead probes, all Balanced risk limit/status paths, state transitions, pending-order reservations, correlation alignment, tamper-evident risk exports, and safety architecture audits.
+The default suite is deterministic, fast, and independent of Yahoo Finance and the network. It uses `FakeDataProvider` plus synthetic sessions, invalid bars, gaps, corporate actions, feature/regime warm-ups, future-append invariance, exact-timestamp relative strength, all four baselines, two-axis classification, confirmation/transitions, activation matrices, Mean Reversion eligibility/exits/no-averaging, monotonic policy/risk sizing, execution costs, Balanced risk paths, backward-compatible tamper-evident exports, and architecture audits.
 
 ```powershell
 .\.venv\Scripts\python -m compileall -q src
@@ -353,4 +417,4 @@ Expected safety matrix:
 
 ## Roadmap
 
-Lots 0, 0.1, 1, 2, 3, and 4 provide foundations, universe/CI alignment, historical data, deterministic simulation, shared features, quantitative research baselines, and the offline Balanced Risk Engine. Lot 5 remains TODO and will address regime detection in its own reviewed scope; no Regime Detector or Mean Reversion strategy is included here. Later lots cover ML, portfolio construction, dashboarding, and broker/paper integration. Aggressive Research remains locked. See `PROJECT_STATE.md` for the authoritative status.
+Lots 0 through 5 now provide foundations, universe/CI alignment, historical data, deterministic simulation, shared Feature Engine 1.1, four quantitative research baselines, the offline Balanced Risk Engine, two-axis rule-based regime classification, and configuration-driven strategy eligibility. Lot 6 remains TODO and is the first lot allowed to introduce Machine Learning. Later lots cover portfolio construction, dashboarding, and broker/paper integration. Aggressive Research remains locked. See `PROJECT_STATE.md` for the authoritative status.

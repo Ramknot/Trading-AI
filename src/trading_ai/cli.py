@@ -1,4 +1,4 @@
-"""Safety diagnostics, historical-data, and offline backtest commands."""
+"""Safety, data, risk, regime, strategy, and offline backtest commands."""
 
 from __future__ import annotations
 
@@ -27,7 +27,12 @@ from trading_ai.core.exceptions import TradingAIError
 from trading_ai.core.health import HealthReport, doctor
 from trading_ai.data.engine import DataEngine
 from trading_ai.data.exceptions import DataError
-from trading_ai.data.models import CacheMode, DataFetchResult, DatasetInspection
+from trading_ai.data.models import (
+    CacheMode,
+    DataFetchResult,
+    DatasetInspection,
+    QualityStatus,
+)
 from trading_ai.data.providers import YahooFinanceProvider
 from trading_ai.data.storage import ParquetDataStore
 from trading_ai.risk.balanced import BalancedRiskEngine
@@ -37,8 +42,22 @@ from trading_ai.risk.config import (
     load_balanced_risk_config,
     risk_config_hash,
 )
+from trading_ai.features import FeatureEngine
+from trading_ai.regimes import (
+    BalancedRegimeDetector,
+    BalancedStrategyActivationPolicy,
+    RegimeError,
+    build_regime_report,
+    inspect_regime_config,
+    inspect_strategy_policy_config,
+    load_balanced_regime_config,
+    load_balanced_strategy_policy_config,
+    regime_config_hash,
+    strategy_policy_config_hash,
+)
 from trading_ai.strategies.config import (
     BreakoutConfig,
+    MeanReversionConfig,
     MomentumConfig,
     TrendConfig,
 )
@@ -166,7 +185,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--strategy",
         choices=("buy-and-hold", *BASELINE_STRATEGIES.names),
         default="buy-and-hold",
-        help="buy-and-hold demo, trend, momentum, or breakout",
+        help="buy-and-hold demo, trend, momentum, breakout, or mean-reversion",
     )
     run_parser.add_argument(
         "--symbol",
@@ -196,6 +215,9 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--minimum-return", type=_parse_decimal)
     run_parser.add_argument("--entry-window", type=int)
     run_parser.add_argument("--exit-window", type=int)
+    run_parser.add_argument("--mean-reversion-lookback", type=int)
+    run_parser.add_argument("--entry-zscore", type=_parse_decimal)
+    run_parser.add_argument("--exit-zscore", type=_parse_decimal)
     run_parser.add_argument(
         "--starting-cash", type=_parse_decimal, default=Decimal("100000")
     )
@@ -255,6 +277,46 @@ def build_parser() -> argparse.ArgumentParser:
         "--profile", default=os.getenv("TRADING_AI_PROFILE", "balanced")
     )
     risk_inspect.add_argument("--json", action="store_true", dest="as_json")
+
+    regime_parser = commands.add_parser(
+        "regime", help="inspect cached-data regimes and activation policy offline"
+    )
+    regime_commands = regime_parser.add_subparsers(
+        dest="regime_command", required=True
+    )
+    regime_inspect = regime_commands.add_parser(
+        "inspect", help="classify one exact cached dataset without downloading"
+    )
+    regime_inspect.add_argument(
+        "--profile", default=os.getenv("TRADING_AI_PROFILE", "balanced")
+    )
+    regime_inspect.add_argument("--symbol", required=True)
+    regime_inspect.add_argument(
+        "--timeframe", required=True, choices=("1h", "4h", "1d")
+    )
+    regime_inspect.add_argument("--start", required=True, type=_parse_datetime)
+    regime_inspect.add_argument("--end", required=True, type=_parse_datetime)
+    _add_store_arguments(regime_inspect)
+
+    regime_latest = regime_commands.add_parser(
+        "latest", help="display the latest regime from the latest cached dataset"
+    )
+    regime_latest.add_argument(
+        "--profile", default=os.getenv("TRADING_AI_PROFILE", "balanced")
+    )
+    regime_latest.add_argument("--symbol", required=True)
+    regime_latest.add_argument(
+        "--timeframe", required=True, choices=("1h", "4h", "1d")
+    )
+    _add_store_arguments(regime_latest)
+
+    regime_policy = regime_commands.add_parser(
+        "policy", help="display the configuration-driven Balanced policy matrix"
+    )
+    regime_policy.add_argument(
+        "--profile", default=os.getenv("TRADING_AI_PROFILE", "balanced")
+    )
+    regime_policy.add_argument("--json", action="store_true", dest="as_json")
     return parser
 
 
@@ -395,10 +457,26 @@ def _breakout_cli_config(args: argparse.Namespace) -> BreakoutConfig:
     )
 
 
+def _mean_reversion_cli_config(args: argparse.Namespace) -> MeanReversionConfig:
+    defaults = MeanReversionConfig()
+    return MeanReversionConfig(
+        lookback=_option(
+            args.mean_reversion_lookback,
+            defaults.lookback,
+        ),
+        entry_zscore=_option(args.entry_zscore, defaults.entry_zscore),
+        exit_zscore=_option(args.exit_zscore, defaults.exit_zscore),
+        allocation_fraction=_option(
+            args.allocation_fraction, defaults.allocation_fraction
+        ),
+    )
+
+
 _CLI_CONFIG_BUILDERS = {
     "trend": _trend_cli_config,
     "momentum": _momentum_cli_config,
     "breakout": _breakout_cli_config,
+    "mean-reversion": _mean_reversion_cli_config,
 }
 
 
@@ -493,6 +571,135 @@ def _run_risk(args: argparse.Namespace) -> int:
     return 0
 
 
+def _regime_snapshot_payload(snapshot) -> dict[str, Any]:
+    return {
+        "snapshot_id": snapshot.snapshot_id,
+        "symbol": snapshot.symbol,
+        "timestamp": snapshot.timestamp.isoformat(),
+        "timeframe": snapshot.timeframe,
+        "structure_regime": snapshot.structure_regime.value,
+        "volatility_regime": snapshot.volatility_regime.value,
+        "bars_in_current_structure_regime": (
+            snapshot.bars_in_current_structure_regime
+        ),
+        "candidate_structure_regime": snapshot.candidate_structure_regime.value,
+        "confirmation_progress": snapshot.confirmation_progress,
+        "reason_codes": list(snapshot.reason_codes),
+        "evidence": dict(snapshot.evidence),
+    }
+
+
+def _run_regime(args: argparse.Namespace) -> int:
+    if args.regime_command == "policy":
+        profile = inspect_profile(args.profile)
+        config = inspect_strategy_policy_config(profile.name)
+        locked = (
+            profile.name.value == "aggressive"
+            or not profile.enabled
+            or not config.enabled
+        )
+        if not locked:
+            config = load_balanced_strategy_policy_config(profile)
+        matrix: dict[str, dict[str, dict[str, str]]] = {}
+        for rule in config.structure_rules:
+            matrix.setdefault(rule.structure.value, {})[rule.strategy_name] = {
+                "status": rule.status.value,
+                "multiplier": str(rule.multiplier),
+            }
+        overlays: dict[str, dict[str, dict[str, str]]] = {}
+        for overlay in config.volatility_overlays:
+            overlays.setdefault(overlay.volatility.value, {})[
+                overlay.strategy_name
+            ] = {
+                "status": overlay.status.value,
+                "multiplier": str(overlay.multiplier),
+            }
+        payload = {
+            "profile": profile.name.value,
+            "profile_enabled": profile.enabled,
+            "enabled": config.enabled,
+            "locked": locked,
+            "policy_name": config.policy_name,
+            "policy_version": config.policy_version,
+            "config_hash": strategy_policy_config_hash(config),
+            "structure": matrix,
+            "volatility_overlays": overlays,
+            "warning": "eligibility never overrides BalancedRiskEngine",
+        }
+        print(_render_payload(payload, args.as_json))
+        return 0
+
+    settings = load_runtime_settings("PAPER", args.profile)
+    if args.symbol not in settings.profile.asset_universe:
+        raise ValueError("symbol must come from the active profile configuration")
+    config = load_balanced_regime_config(settings.profile)
+    store = ParquetDataStore(args.data_root)
+    if args.regime_command == "inspect":
+        start = args.start
+        end = args.end
+    elif args.regime_command == "latest":
+        manifest = store.find_latest(args.symbol, args.timeframe)
+        if manifest is None:
+            raise ValueError(
+                f"no cached dataset for {args.symbol} {args.timeframe}; regime commands never download"
+            )
+        start = manifest.requested_start
+        end = manifest.requested_end
+    else:
+        raise AssertionError(f"unhandled regime command: {args.regime_command}")
+    dataset = load_cached_dataset(
+        store,
+        symbol=args.symbol,
+        timeframe=args.timeframe,
+        start=start,
+        end=end,
+    )
+    if dataset.quality_report.quality_status is QualityStatus.FAIL:
+        raise ValueError("DataQuality FAIL cannot be classified by the Regime Detector")
+    detector = BalancedRegimeDetector(config)
+    feature_engine = FeatureEngine()
+    history = []
+    snapshots = []
+    for bar in dataset.bars:
+        history.append(bar)
+        features = feature_engine.compute(
+            history,
+            detector.feature_request,
+            as_of=bar.timestamp,
+        )
+        snapshots.append(detector.evaluate(features))
+    report = build_regime_report(snapshots, detector.transitions, ())
+    payload = {
+        "detector_name": detector.detector_name,
+        "detector_version": detector.detector_version,
+        "config_hash": regime_config_hash(config),
+        "dataset_id": dataset.reference.dataset_id,
+        "dataset_checksum": dataset.reference.checksum_sha256,
+        "data_quality": dataset.quality_report.quality_status.value,
+        "latest": _regime_snapshot_payload(snapshots[-1]),
+        "report": {
+            "bars_by_structure_regime": dict(report.bars_by_structure_regime),
+            "bars_by_volatility_regime": dict(report.bars_by_volatility_regime),
+            "transition_count": report.transition_count,
+        },
+        "transitions": [
+            {
+                "transition_id": item.transition_id,
+                "timestamp": item.timestamp.isoformat(),
+                "from_structure": item.from_structure.value,
+                "to_structure": item.to_structure.value,
+                "from_volatility": item.from_volatility.value,
+                "to_volatility": item.to_volatility.value,
+                "reason": item.reason,
+            }
+            for item in detector.transitions
+        ],
+        "network_access": False,
+    }
+    print(_render_payload(payload, args.as_json))
+    return 0
+
+
 def _run_backtest(args: argparse.Namespace) -> int:
     result_store = BacktestResultStore(args.data_root / "backtests")
     if args.backtest_command == "inspect":
@@ -525,6 +732,9 @@ def _run_backtest(args: argparse.Namespace) -> int:
         )
         for symbol in dataset_symbols
     )
+    regime_detector = None
+    activation_policy = None
+    shared_feature_engine = FeatureEngine()
     if args.strategy == "buy-and-hold":
         strategy = BuyAndHoldDemoStrategy(symbols[0], args.quantity)
     else:
@@ -534,6 +744,10 @@ def _run_backtest(args: argparse.Namespace) -> int:
             symbols=symbols,
             timeframe=args.timeframe,
             config=config_builder(args),
+        )
+        regime_detector = BalancedRegimeDetector.from_profile(settings.profile)
+        activation_policy = BalancedStrategyActivationPolicy.from_profile(
+            settings.profile
         )
     config = BacktestConfig(
         starting_cash=args.starting_cash,
@@ -554,7 +768,12 @@ def _run_backtest(args: argparse.Namespace) -> int:
         benchmark_symbol=benchmark_symbol,
     )
     risk_engine = BalancedRiskEngine.from_profile(settings.profile)
-    result = BacktestEngine(risk_engine=risk_engine).run(
+    result = BacktestEngine(
+        risk_engine=risk_engine,
+        feature_engine=shared_feature_engine,
+        regime_detector=regime_detector,
+        activation_policy=activation_policy,
+    ).run(
         strategy,
         datasets,
         settings.context,
@@ -604,6 +823,22 @@ def _run_backtest(args: argparse.Namespace) -> int:
             "max_drawdown": result.risk_summary.max_observed_drawdown,
             "max_daily_loss": result.risk_summary.max_daily_loss,
         },
+        "regime": (
+            {
+                "detector": result.regime_detector_name,
+                "version": result.regime_detector_version,
+                "config_hash": result.regime_config_hash,
+                "policy": result.strategy_policy_name,
+                "policy_version": result.strategy_policy_version,
+                "policy_config_hash": result.strategy_policy_config_hash,
+                "transitions": len(result.regime_transitions),
+                "activation_allow": result.regime_report.activation_allow,
+                "activation_reduce": result.regime_report.activation_reduce,
+                "activation_block": result.regime_report.activation_block,
+            }
+            if result.regime_report is not None
+            else {"status": "unavailable"}
+        ),
         "strategy_parameters": dict(result.strategy_parameters),
         "export_path": str(export_directory),
         "warnings": list(result.warnings),
@@ -627,7 +862,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_strategy(args)
         if args.command == "risk":
             return _run_risk(args)
-    except (BacktestError, DataError, TradingAIError, ValueError) as exc:
+        if args.command == "regime":
+            return _run_regime(args)
+    except (BacktestError, DataError, RegimeError, TradingAIError, ValueError) as exc:
         if getattr(args, "as_json", False):
             print(json.dumps({"status": "ERROR", "error": str(exc)}))
         else:

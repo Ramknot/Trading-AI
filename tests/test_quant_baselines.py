@@ -238,7 +238,12 @@ def test_baseline_runs_on_each_balanced_timeframe(timeframe, paper_context) -> N
 
 
 def test_registry_lists_and_builds_all_baselines_without_symbol_constants() -> None:
-    assert BASELINE_STRATEGIES.names == ("breakout", "momentum", "trend")
+    assert BASELINE_STRATEGIES.names == (
+        "breakout",
+        "mean-reversion",
+        "momentum",
+        "trend",
+    )
     assert all(descriptor.default_parameters for descriptor in BASELINE_STRATEGIES.descriptors)
     assert BASELINE_STRATEGIES.create(
         "trend",

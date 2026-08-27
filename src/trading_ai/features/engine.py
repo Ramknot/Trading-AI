@@ -25,6 +25,8 @@ from trading_ai.features.momentum import (
 )
 from trading_ai.features.structure import (
     distance_to_level,
+    efficiency_ratio,
+    price_zscore,
     previous_rolling_high,
     previous_rolling_low,
 )
@@ -36,7 +38,8 @@ from trading_ai.features.trend import (
 )
 from trading_ai.features.volatility import (
     average_true_range_series,
-    rolling_volatility,
+    rolling_percentile,
+    rolling_volatility_series,
     true_range,
 )
 from trading_ai.features.volume import relative_volume, rolling_average_volume
@@ -120,8 +123,18 @@ class FeatureEngine:
             highs, lows, closes, definition.atr_window
         )
         values[f"atr_{definition.atr_window}"] = atr[-1]
+        volatility_series = rolling_volatility_series(
+            closes, definition.volatility_window
+        )
         values[f"rolling_vol_{definition.volatility_window}"] = (
-            rolling_volatility(closes, definition.volatility_window)
+            volatility_series[-1]
+        )
+        values[
+            "volatility_percentile_"
+            f"{definition.volatility_window}_"
+            f"{definition.volatility_percentile_window}"
+        ] = rolling_percentile(
+            volatility_series, definition.volatility_percentile_window
         )
 
         average_volume = rolling_average_volume(volumes, definition.volume_window)
@@ -141,6 +154,14 @@ class FeatureEngine:
             values[f"distance_to_previous_low_{window}"] = distance_to_level(
                 closes[-1], previous_low
             )
+
+        for window in definition.efficiency_windows:
+            values[f"efficiency_ratio_{window}"] = efficiency_ratio(
+                closes, window
+            )
+
+        for window in definition.zscore_windows:
+            values[f"price_zscore_{window}"] = price_zscore(closes, window)
 
         latest = normalized[-1]
         snapshot = FeatureSnapshot(

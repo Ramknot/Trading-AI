@@ -1,0 +1,31 @@
+name = "aggressive"
+enabled = false
+policy_name = "aggressive-strategy-policy-locked"
+policy_version = "0"
+
+[structure.TREND_UP]
+trend = { status = "BLOCK", multiplier = 0.0 }
+momentum = { status = "BLOCK", multiplier = 0.0 }
+breakout = { status = "BLOCK", multiplier = 0.0 }
+"mean-reversion" = { status = "BLOCK", multiplier = 0.0 }
+
+[structure.RANGE]
+trend = { status = "BLOCK", multiplier = 0.0 }
+momentum = { status = "BLOCK", multiplier = 0.0 }
+breakout = { status = "BLOCK", multiplier = 0.0 }
+"mean-reversion" = { status = "BLOCK", multiplier = 0.0 }
+
+[structure.TREND_DOWN]
+trend = { status = "BLOCK", multiplier = 0.0 }
+momentum = { status = "BLOCK", multiplier = 0.0 }
+breakout = { status = "BLOCK", multiplier = 0.0 }
+"mean-reversion" = { status = "BLOCK", multiplier = 0.0 }
+
+[structure.UNKNOWN]
+trend = { status = "BLOCK", multiplier = 0.0 }
+momentum = { status = "BLOCK", multiplier = 0.0 }
+breakout = { status = "BLOCK", multiplier = 0.0 }
+"mean-reversion" = { status = "BLOCK", multiplier = 0.0 }
+
+[volatility.HIGH]
+"mean-reversion" = { status = "BLOCK", multiplier = 0.0 }

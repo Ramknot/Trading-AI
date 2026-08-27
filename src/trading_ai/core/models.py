@@ -22,6 +22,12 @@ if TYPE_CHECKING:
         Trade,
     )
     from trading_ai.risk.models import RiskStateTransition, RiskSummary
+    from trading_ai.regimes.models import (
+        ActivationDecision,
+        RegimeReport,
+        RegimeSnapshot,
+        RegimeTransition,
+    )
 
 
 class ExecutionEnvironment(str, Enum):
@@ -166,6 +172,7 @@ class OrderRequest:
     order_type: OrderType = OrderType.MARKET
     limit_price: Decimal | None = None
     strategy_decision_id: str | None = None
+    activation_decision_id: str | None = None
     created_at: datetime | None = None
     expected_entry_price: Decimal | None = None
     invalidation_price: Decimal | None = None
@@ -188,6 +195,8 @@ class OrderRequest:
             raise ValueError("limit_price must be positive")
         if self.created_at is not None:
             _require_aware(self.created_at, "created_at")
+        if self.activation_decision_id is not None:
+            _require_non_empty(self.activation_decision_id, "activation_decision_id")
         for field_name in (
             "expected_entry_price",
             "invalidation_price",
@@ -449,6 +458,18 @@ class BacktestResult:
     risk_decisions: tuple[RiskDecision, ...] = ()
     risk_state_transitions: tuple[RiskStateTransition, ...] = ()
     risk_summary: RiskSummary | None = None
+    regime_detector_name: str = "unavailable"
+    regime_detector_version: str = "0"
+    regime_config: tuple[tuple[str, str], ...] = ()
+    regime_config_hash: str = "0" * 64
+    strategy_policy_name: str = "unavailable"
+    strategy_policy_version: str = "0"
+    strategy_policy_config: tuple[tuple[str, str], ...] = ()
+    strategy_policy_config_hash: str = "0" * 64
+    regime_snapshots: tuple[RegimeSnapshot, ...] = ()
+    regime_transitions: tuple[RegimeTransition, ...] = ()
+    activation_decisions: tuple[ActivationDecision, ...] = ()
+    regime_report: RegimeReport | None = None
 
     def __post_init__(self) -> None:
         _require_non_empty(self.run_id, "run_id")
@@ -530,6 +551,72 @@ class BacktestResult:
             decision.order_id for decision in self.risk_decisions
         } != order_ids:
             raise ValueError("every simulated order requires exactly one risk decision")
+        for field_name in (
+            "regime_detector_name",
+            "regime_detector_version",
+            "strategy_policy_name",
+            "strategy_policy_version",
+        ):
+            _require_non_empty(getattr(self, field_name), field_name)
+        for field_name in ("regime_config", "strategy_policy_config"):
+            parameters = getattr(self, field_name)
+            if tuple(sorted(parameters)) != parameters:
+                raise ValueError(f"{field_name} must be deterministically sorted")
+        for field_name in ("regime_config_hash", "strategy_policy_config_hash"):
+            value = getattr(self, field_name)
+            if len(value) != 64 or any(
+                character not in "0123456789abcdef"
+                for character in value.lower()
+            ):
+                raise ValueError(f"{field_name} must be a SHA-256 digest")
+        snapshot_ids = [snapshot.snapshot_id for snapshot in self.regime_snapshots]
+        if len(snapshot_ids) != len(set(snapshot_ids)):
+            raise ValueError("regime snapshot IDs must be unique")
+        snapshot_keys = [
+            (snapshot.timestamp, snapshot.symbol, snapshot.timeframe)
+            for snapshot in self.regime_snapshots
+        ]
+        if snapshot_keys != sorted(snapshot_keys):
+            raise ValueError("regime snapshots must be deterministically sorted")
+        if any(
+            snapshot.detector_name != self.regime_detector_name
+            or snapshot.detector_version != self.regime_detector_version
+            or snapshot.config_hash != self.regime_config_hash
+            for snapshot in self.regime_snapshots
+        ):
+            raise ValueError("regime snapshot provenance must match the result")
+        transition_ids = [item.transition_id for item in self.regime_transitions]
+        if len(transition_ids) != len(set(transition_ids)):
+            raise ValueError("regime transition IDs must be unique")
+        activation_ids = [item.decision_id for item in self.activation_decisions]
+        if len(activation_ids) != len(set(activation_ids)):
+            raise ValueError("activation decision IDs must be unique")
+        known_signals = set(signal_ids)
+        known_snapshots = set(snapshot_ids)
+        if any(
+            item.signal_id not in known_signals
+            or item.regime_snapshot_id not in known_snapshots
+            for item in self.activation_decisions
+        ):
+            raise ValueError("activation decisions must reference signal and regime lineage")
+        if any(
+            item.policy_name != self.strategy_policy_name
+            or item.policy_version != self.strategy_policy_version
+            or item.policy_config_hash != self.strategy_policy_config_hash
+            for item in self.activation_decisions
+        ):
+            raise ValueError("activation decision provenance must match the result")
+        known_activations = set(activation_ids)
+        if self.activation_decisions and any(
+            order.activation_decision_id is None for order in self.orders
+        ):
+            raise ValueError("every policy-filtered order requires an ActivationDecision")
+        if any(
+            order.activation_decision_id is not None
+            and order.activation_decision_id not in known_activations
+            for order in self.orders
+        ):
+            raise ValueError("order activation lineage must reference a result decision")
 
     @property
     def finished_at(self) -> datetime:
