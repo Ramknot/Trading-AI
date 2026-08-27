@@ -1,6 +1,6 @@
 # Trading AI
 
-Trading AI is a safety-first, modular Python project for reproducible market research, paper trading, and future controlled execution. Lot 2 adds a deterministic, offline Backtesting Engine to the foundations, market-data pipeline, and CI delivered in Lots 0, 0.1, and 1. It does not add an investment strategy, indicators, optimization, machine learning, broker integration, or any real-order path.
+Trading AI is a safety-first, modular Python project for reproducible market research, paper trading, and future controlled execution. Lot 3 adds a shared Feature Engine and three explainable quantitative research baselines to the foundations, market-data pipeline, and deterministic Backtesting Engine delivered in Lots 0 through 2. It does not add optimization, a real Risk Engine, regime classification, machine learning, broker integration, or any real-order path.
 
 ## Safety guarantees
 
@@ -27,7 +27,8 @@ src/trading_ai/data/
   storage.py                      Parquet datasets, manifests, and SHA-256 integrity
   providers/fake.py               deterministic offline test provider
   providers/yahoo.py              development historical-data adapter
-src/trading_ai/strategies/        Strategy contract only
+src/trading_ai/features/          shared trend, momentum, volatility, volume, structure features
+src/trading_ai/strategies/        contracts, configs, sizing, registry, and Lot 3 baselines
 src/trading_ai/ml/                MLScorer contract only
 src/trading_ai/portfolio/         PortfolioEngine contract only
 src/trading_ai/risk/              mandatory RiskEngine and DenyAllRiskEngine
@@ -59,7 +60,8 @@ The historical-simulation flow is separate from both providers and brokers:
 
 ```text
 DataEngine -> validated BacktestDataset -> BacktestEngine
-                                           |-> BacktestStrategy (past + present only)
+                                           |-> FeatureEngine (past + present only)
+                                           |-> BacktestStrategy (feature snapshots/signals)
                                            |-> ExecutionModel
                                            |-> PortfolioLedger
                                            |-> MetricsEngine
@@ -78,7 +80,7 @@ python -m venv .venv
 .\.venv\Scripts\python -m pip install -e ".[dev]"
 ```
 
-Runtime dependencies remain deliberately limited to the Lot 1 set: `pandas`, `pyarrow`, `yfinance`, and `pandas-market-calendars`. Lot 2 adds no dependency or external backtesting framework; numerical metrics use the Python standard library. `pytest` is the development dependency. Yahoo Finance is a development/research source, not a guaranteed production or live-trading feed.
+Runtime dependencies remain deliberately limited to the Lot 1 set: `pandas`, `pyarrow`, `yfinance`, and `pandas-market-calendars`. Lots 2 and 3 add no dependency or external backtesting/indicator framework; features and numerical metrics use the Python standard library. `pytest` is the development dependency. Yahoo Finance is a development/research source, not a guaranteed production or live-trading feed.
 
 ## Data Engine
 
@@ -170,7 +172,7 @@ The optional `BuyAndHoldBenchmark` is a dedicated benchmark component, not an op
 
 ### Provenance, reproducibility, and exports
 
-Every `BacktestResult` records strategy name/version/parameters, exact dataset IDs and SHA-256 checksums, corporate-action lineage, simulation config, historical start/end, optional Git commit SHA, a SHA-256 of the current Python source tree, orders, fills, trades, ledger entries, warnings, benchmark, and a stable run/result hash. The source hash makes an uncommitted/dirty run distinguishable even when `HEAD` still names an older commit. Technical creation time is excluded from the deterministic hash, so identical strategy parameters, source/code version, config, and datasets produce identical orders, fills, trades, equity, metrics, run ID, and result hash.
+Every `BacktestResult` records strategy name/version/parameters, feature schema/engine lineage for Lot 3 baselines, exact dataset IDs and SHA-256 checksums, corporate-action lineage, simulation config, historical start/end, optional Git commit SHA, a SHA-256 of the current Python source tree, explainable signals, orders, fills, trades, ledger entries, warnings, benchmark, and a stable run/result hash. The source hash makes an uncommitted/dirty run distinguishable even when `HEAD` still names an older commit. Technical creation time is excluded from the deterministic hash, so identical strategy parameters, source/code version, config, and datasets produce identical features, signals, orders, fills, trades, equity, metrics, run ID, and result hash.
 
 Exports stay below the Git-ignored local tree:
 
@@ -181,6 +183,7 @@ data_local/backtests/<run_id>/
   orders.parquet
   fills.parquet
   trades.parquet
+  signals.parquet
   ledger.parquet
   checksums.json
 ```
@@ -190,6 +193,40 @@ data_local/backtests/<run_id>/
 ### Lot 2 limitations
 
 Lot 2 deliberately has no strategy parameter optimization, grid search, walk-forward training, ML comparison, automatic end-of-run liquidation, or real liquidity model. Trade metrics describe closed FIFO trades; an open final position remains visible in equity and exposure but is not fabricated into a closing trade. Profile-level sizing rules such as maximum positions, maximum exposure, risk budget, and turnover budget remain responsibilities of the future Portfolio/Risk components; the simulator itself still enforces the hard Balanced cash and no-short boundaries. Multi-timeframe scheduling is reserved as described above. The ledger currently assumes every supplied price and cash amount uses one common currency; cross-currency US/European portfolios require an explicit future FX policy and must not be interpreted as currency-correct today. The current profile universe is still not point-in-time and future research may retain survivorship bias.
+
+## Feature Engine and Quantitative Baselines
+
+### Shared feature definitions
+
+`FeatureEngine` is the only Lot 3 source of quantitative calculations. It accepts one immutable, normalized symbol/timeframe history and returns an immutable `FeatureSnapshot` for its latest observable bar. Stable feature names and `feature_schema_version = 1.0` make the definitions traceable for strategies and future regime/ML lots. The current definitions are:
+
+- Trend: `sma_N`, `ema_N`, per-bar moving-average slope over a configured lookback, and decimal price-to-average distance.
+- Momentum: one-bar simple return, `return_N` as a decimal rolling return, `roc_N` as the percentage equivalent, plus exact-timestamp cross-sectional rank and percentile.
+- Volatility: true range, Wilder ATR seeded after a full window, and sample rolling volatility of simple returns.
+- Volume: rolling mean volume and current volume divided by that mean. A zero mean produces unavailable data, never infinity.
+- Structure: `previous_high_N`, `previous_low_N`, and price distance to each level. The reference range explicitly excludes the current bar.
+
+All windows are counts of bars, not days: `20` means 20 bars for `1h`, `4h`, or `1d`. Warm-up values remain `None`; they are never backfilled, extrapolated, or replaced with partial-window estimates. Strategy-required features must all be available before an order can be proposed. The bounded Feature Engine cache reuses only exact immutable inputs.
+
+### Anti-look-ahead rule
+
+A feature at time `t` uses only bars with timestamps less than or equal to `t`. Supplying a later history with `as_of=t` filters every later bar before calculation, and tests assert that appending future data cannot change SMA/EMA, momentum, ATR, or prior-range levels at `t`. Strategies still receive the Lot 2 `StrategyContext`; no full future DataFrame, `next_close`, or negative-future shift is exposed.
+
+Cross-sectional relative strength uses only assets that have a real bar at exactly the same UTC timestamp. Missing Europe/US observations are reported and the baseline skips that snapshot; it never forward-fills one market into another. This strict policy is safe but means mixed-calendar datasets may have few or no coherent ranking points until a future explicit decision-calendar policy is designed.
+
+### Research baselines
+
+The production research registry exposes three versioned long-only baselines. Their immutable defaults are reference values, not optimized parameters:
+
+- `trend` (`1.0`): enter when EMA 20 is above EMA 50, close is above EMA 50, and the five-bar fast-EMA slope is positive; exit when EMA 20 is no longer above EMA 50. Default allocation fraction: 25%.
+- `momentum` (`1.0`): rank exact-common-timestamp 20-bar returns, select up to the positive top 3, and reconsider the selection every five coherent bars. Default total allocation fraction: 60%, divided equally across new targets.
+- `breakout` (`1.0`): enter when close exceeds the previous 20-bar high and exit when close falls below the previous 10-bar low. Current-bar highs/lows never define their own trigger. Default allocation fraction: 25%.
+
+Every ENTER/EXIT signal stores strategy/version, UTC timestamp, reason, strength, and exact feature values; simulated orders reference the originating signal ID. No opaque BUY/SELL action is generated. `BaselineSizer` provides only temporary total-allocation/fractional-share sizing for these research runs, split across configured symbols or momentum targets and capped by the active profile exposure ceiling. It is deliberately not named or treated as `PortfolioEngine`. The existing ledger remains authoritative for cash, no leverage, and no short positions.
+
+`StrategyReport` exposes strategy parameters, trades, return, drawdown, Sharpe, turnover, benchmark return, and excess return. Multi-report comparison preserves the requested order and never declares an automatic winner. Turnover remains an observed metric, not an optimization objective.
+
+The Lot 3 strategies are research baselines, not claims of profitable trading systems. No parameter sweep, hidden winner selection, ML, regime detector, or real risk-budget logic is present. Mean Reversion is intentionally reserved for Lot 5 so it can later be conditioned on an explicit regime policy. A present-day configured universe is not point-in-time, so future results can retain survivorship bias.
 
 ## CLI
 
@@ -212,18 +249,22 @@ trading-ai data inspect --symbol AAPL --timeframe 1d --json
 
 Date-only CLI values are UTC day boundaries. Datetime values must carry `Z` or an explicit offset. `validate` and `inspect` only read local storage.
 
-Lot 2 adds an explicitly technical demonstration runner. It is not the Lot 3 quantitative baseline and never downloads missing data. The requested symbol, timeframe, start, and end must exactly match an existing Lot 1 cache manifest:
+Backtests never download missing data. Each requested symbol, timeframe, start, and end must exactly match an existing Lot 1 cache manifest. The technical demo remains available, and Lot 3 baselines can be selected from the shared registry:
 
 ```powershell
 trading-ai backtest run --strategy buy-and-hold --symbol SPY --timeframe 1d --start 2024-01-01 --end 2025-01-01 --starting-cash 100000 --spread-bps 5 --slippage-bps 5 --commission-fixed 1 --json
+trading-ai backtest run --strategy trend --symbol SPY --timeframe 1d --start 2024-01-01 --end 2025-01-01 --spread-bps 5 --slippage-bps 5 --commission-fixed 1 --json
+trading-ai backtest run --strategy momentum --symbol SPY --symbol QQQ --symbol IWM --timeframe 1d --start 2024-01-01 --end 2025-01-01 --top-k 2 --rebalance-every 5 --spread-bps 5 --slippage-bps 5 --commission-fixed 1 --json
+trading-ai backtest run --strategy breakout --symbol AAPL --timeframe 4h --start 2024-06-01 --end 2024-07-01 --entry-window 20 --exit-window 10 --spread-bps 5 --slippage-bps 5 --commission-fixed 1 --json
 trading-ai backtest inspect --run-id bt-0123456789abcdef01234567 --json
+trading-ai strategy list --json
 ```
 
-The demo submits one buy intent and uses the selected symbol as its configurable Buy & Hold benchmark by default. `run` exports under `data_local/backtests/`; `inspect` verifies checksums before reading the summary. A cache miss fails clearly without falling back to Yahoo Finance.
+The demo submits one buy intent. Every command uses the first selected symbol as its configurable Buy & Hold benchmark unless `--benchmark-symbol` names another cached profile symbol. Strategy-specific window/allocation flags override immutable defaults for that run, and the resolved values are stored in `BacktestResult`. `run` exports under `data_local/backtests/`; `inspect` verifies checksums before reading the summary. A cache miss fails clearly without falling back to Yahoo Finance.
 
 ## Tests and CI
 
-The default suite is deterministic, fast, and independent of Yahoo Finance and the network. It uses `FakeDataProvider` plus small synthetic sessions, invalid bars, gaps, corporate actions, execution costs, partial exits, known metric curves, and look-ahead probes.
+The default suite is deterministic, fast, and independent of Yahoo Finance and the network. It uses `FakeDataProvider` plus small synthetic sessions, invalid bars, gaps, corporate actions, feature warm-ups, future-append invariance, relative-strength ties/missing assets, all three baselines, execution costs, partial exits, known metric curves, and look-ahead probes.
 
 ```powershell
 .\.venv\Scripts\python -m compileall -q src
@@ -253,4 +294,4 @@ Expected safety matrix:
 
 ## Roadmap
 
-Lots 0, 0.1, 1, and 2 provide foundations, universe/CI alignment, historical data, and deterministic historical simulation. Lot 3 Baseline Quant has not started. Later lots cover a real risk engine, regime detection, ML, portfolio construction, dashboarding, and broker/paper integration. Aggressive Research remains locked. See `PROJECT_STATE.md` for the authoritative status.
+Lots 0, 0.1, 1, 2, and 3 provide foundations, universe/CI alignment, historical data, deterministic simulation, shared features, and quantitative research baselines. Lot 4 is the next TODO and will address a real Risk Engine in its own reviewed scope; it has not started here. Later lots cover regime detection, ML, portfolio construction, dashboarding, and broker/paper integration. Aggressive Research remains locked. See `PROJECT_STATE.md` for the authoritative status.

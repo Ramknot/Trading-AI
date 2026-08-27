@@ -56,6 +56,12 @@ class OrderStatus(str, Enum):
     CANCELLED = "CANCELLED"
 
 
+class StrategySignalAction(str, Enum):
+    ENTER_LONG = "ENTER_LONG"
+    EXIT_LONG = "EXIT_LONG"
+    HOLD = "HOLD"
+
+
 class LedgerEntryType(str, Enum):
     FILL = "FILL"
     DIVIDEND = "DIVIDEND"
@@ -262,6 +268,7 @@ class OrderIntent:
     order_type: OrderType = OrderType.MARKET
     limit_price: Decimal | None = None
     timeframe: str | None = None
+    signal_id: str | None = None
 
     def __post_init__(self) -> None:
         _require_text(self.symbol, "symbol")
@@ -278,6 +285,46 @@ class OrderIntent:
             raise ValueError("limit_price is only valid for LIMIT orders")
         if self.timeframe is not None:
             _require_text(self.timeframe, "timeframe")
+        if self.signal_id is not None:
+            _require_text(self.signal_id, "signal_id")
+
+
+@dataclass(frozen=True, slots=True)
+class StrategySignal:
+    """Explainable strategy event with no execution authority."""
+
+    signal_id: str
+    strategy_name: str
+    strategy_version: str
+    symbol: str
+    timeframe: str
+    timestamp: datetime
+    action: StrategySignalAction
+    strength: float
+    reason: str
+    features_used: tuple[tuple[str, str], ...]
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "signal_id",
+            "strategy_name",
+            "strategy_version",
+            "symbol",
+            "timeframe",
+            "reason",
+        ):
+            _require_text(getattr(self, field_name), field_name)
+        _require_aware(self.timestamp, "timestamp")
+        if not 0.0 <= self.strength <= 1.0:
+            raise ValueError("signal strength must be between 0 and 1")
+        if tuple(sorted(self.features_used)) != self.features_used:
+            raise ValueError("features_used must be sorted by stable feature name")
+        names = [name for name, _ in self.features_used]
+        if len(names) != len(set(names)):
+            raise ValueError("features_used must have unique names")
+        for name, value in self.features_used:
+            _require_text(name, "feature name")
+            _require_text(value, "feature value")
 
 
 @dataclass(frozen=True, slots=True)
@@ -289,6 +336,7 @@ class BacktestOrder:
     quantity: Decimal
     order_type: OrderType
     created_at: datetime
+    signal_id: str | None = None
     status: OrderStatus = OrderStatus.PENDING
     limit_price: Decimal | None = None
     status_reason: str | None = None
@@ -300,6 +348,8 @@ class BacktestOrder:
         _require_text(self.symbol, "symbol")
         _require_text(self.timeframe, "timeframe")
         _require_aware(self.created_at, "created_at")
+        if self.signal_id is not None:
+            _require_text(self.signal_id, "signal_id")
         if self.completed_at is not None:
             _require_aware(self.completed_at, "completed_at")
         if self.quantity <= ZERO:

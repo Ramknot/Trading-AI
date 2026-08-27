@@ -13,7 +13,7 @@ from trading_ai.backtesting.reproducibility import to_primitive
 from trading_ai.core.models import BacktestResult
 
 
-RESULT_SCHEMA_VERSION = "1.0"
+RESULT_SCHEMA_VERSION = "1.1"
 _SAFE_RUN_ID = re.compile(r"^[A-Za-z0-9_-]+$")
 _EXPORTED_FILES = frozenset(
     {
@@ -22,9 +22,11 @@ _EXPORTED_FILES = frozenset(
         "orders.parquet",
         "fills.parquet",
         "trades.parquet",
+        "signals.parquet",
         "ledger.parquet",
     }
 )
+_LOT2_EXPORTED_FILES = _EXPORTED_FILES - {"signals.parquet"}
 
 
 def _sha256_file(path: Path) -> str:
@@ -154,6 +156,26 @@ class BacktestResultStore:
                 ("status_reason", pa.string()),
                 ("completed_at", pa.string()),
                 ("eligible_bar_count", pa.int64()),
+                ("signal_id", pa.string()),
+            ]
+        )
+
+    @staticmethod
+    def _signal_schema():
+        import pyarrow as pa
+
+        return pa.schema(
+            [
+                ("signal_id", pa.string()),
+                ("strategy_name", pa.string()),
+                ("strategy_version", pa.string()),
+                ("symbol", pa.string()),
+                ("timeframe", pa.string()),
+                ("timestamp", pa.string()),
+                ("action", pa.string()),
+                ("strength", pa.float64()),
+                ("reason", pa.string()),
+                ("features_used", pa.list_(pa.list_(pa.string(), 2))),
             ]
         )
 
@@ -213,6 +235,7 @@ class BacktestResultStore:
                     "orders": len(result.orders),
                     "fills": len(result.fills),
                     "trades": len(result.trades),
+                    "signals": len(result.signals),
                     "ledger_entries": len(result.ledger_entries),
                 },
             }
@@ -242,6 +265,11 @@ class BacktestResultStore:
                 directory / "orders.parquet",
                 (to_primitive(order) for order in result.orders),
                 self._order_schema(),
+            )
+            self._write_parquet(
+                directory / "signals.parquet",
+                (to_primitive(signal) for signal in result.signals),
+                self._signal_schema(),
             )
             self._write_parquet(
                 directory / "ledger.parquet",
@@ -274,7 +302,8 @@ class BacktestResultStore:
             payload = json.loads(
                 (directory / "checksums.json").read_text(encoding="utf-8")
             )
-            if set(payload["files"]) != _EXPORTED_FILES:
+            exported_files = frozenset(payload["files"])
+            if exported_files not in {_EXPORTED_FILES, _LOT2_EXPORTED_FILES}:
                 raise BacktestStorageError(
                     "backtest checksum manifest has an unexpected file set"
                 )
@@ -294,6 +323,14 @@ class BacktestResultStore:
             summary = json.loads(
                 (directory / "summary.json").read_text(encoding="utf-8")
             )
+            expected_files = {
+                "1.0": _LOT2_EXPORTED_FILES,
+                RESULT_SCHEMA_VERSION: _EXPORTED_FILES,
+            }.get(summary.get("schema_version"))
+            if expected_files is None or exported_files != expected_files:
+                raise BacktestStorageError(
+                    "backtest schema version does not match its exported files"
+                )
             if summary.get("result_hash") != payload.get("result_hash"):
                 raise BacktestStorageError("backtest result hash metadata mismatch")
         except BacktestStorageError:

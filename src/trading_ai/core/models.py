@@ -18,6 +18,7 @@ if TYPE_CHECKING:
         EquityPoint,
         Fill,
         LedgerEntry,
+        StrategySignal,
         Trade,
     )
 
@@ -328,6 +329,7 @@ class BacktestResult:
     orders: tuple[BacktestOrder, ...]
     fills: tuple[Fill, ...]
     trades: tuple[Trade, ...]
+    signals: tuple[StrategySignal, ...]
     ledger_entries: tuple[LedgerEntry, ...]
     warnings: tuple[str, ...]
     benchmark: BenchmarkResult | None
@@ -377,6 +379,14 @@ class BacktestResult:
             for character in self.source_hash_sha256.lower()
         ):
             raise ValueError("source_hash_sha256 must be a SHA-256 digest")
+        signal_ids = [signal.signal_id for signal in self.signals]
+        if len(signal_ids) != len(set(signal_ids)):
+            raise ValueError("strategy signal IDs must be unique")
+        if any(
+            order.signal_id is not None and order.signal_id not in set(signal_ids)
+            for order in self.orders
+        ):
+            raise ValueError("every linked order must reference a result signal")
 
     @property
     def finished_at(self) -> datetime:

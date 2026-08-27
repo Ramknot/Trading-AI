@@ -34,6 +34,8 @@ from trading_ai.backtesting.models import (
     OrderStatus,
     PricePolicy,
     StrategyContext,
+    StrategySignal,
+    StrategySignalAction,
     Trade,
 )
 from trading_ai.backtesting.storage import BacktestResultStore
@@ -71,6 +73,8 @@ __all__ = [
     "OrderStatus",
     "PricePolicy",
     "StrategyContext",
+    "StrategySignal",
+    "StrategySignalAction",
     "Trade",
     "annualization_factor",
     "load_cached_dataset",

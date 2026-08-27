@@ -36,4 +36,11 @@ These rules apply to Codex and every future development agent working in this re
 - Raw prices and corporate actions must not be double counted.
 - Balanced backtests must not allow leverage or short selling.
 - A backtest result is not evidence of future profitability.
+- Feature calculations must never depend on future bars.
+- A feature value at time `t` must remain unchanged if future data is appended.
+- Baseline strategy parameters must not be tuned solely to maximize historical performance.
+- Strategies must use shared `FeatureEngine` definitions instead of reimplementing indicators independently.
+- Mean Reversion is reserved for the Regime Detector lot.
+- Machine learning must not be introduced before the dedicated ML lot.
+- Strategy defaults are research baselines, not optimized parameters.
 - Update `PROJECT_STATE.md` when a lot changes state.

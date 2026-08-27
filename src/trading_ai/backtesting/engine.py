@@ -28,6 +28,7 @@ from trading_ai.backtesting.models import (
     OrderIntent,
     OrderStatus,
     StrategyContext,
+    StrategySignal,
 )
 from trading_ai.backtesting.portfolio import PortfolioLedger
 from trading_ai.backtesting.reproducibility import (
@@ -260,6 +261,7 @@ class BacktestEngine(Backtester):
                         order_type=intent.order_type,
                         created_at=bar.timestamp,
                         limit_price=intent.limit_price,
+                        signal_id=intent.signal_id,
                     )
                     order_indexes[order.order_id] = len(orders)
                     orders.append(order)
@@ -326,6 +328,20 @@ class BacktestEngine(Backtester):
             )
         )
         strategy_parameters = tuple(sorted(strategy.parameters))
+        strategy_signals = tuple(strategy.signals)
+        if any(not isinstance(signal, StrategySignal) for signal in strategy_signals):
+            raise BacktestConfigurationError(
+                "strategy.signals must contain only StrategySignal values"
+            )
+        if any(
+            signal.strategy_name != strategy.name
+            or signal.strategy_version != strategy.version
+            or not bars[0].timestamp <= signal.timestamp <= bars[-1].timestamp
+            for signal in strategy_signals
+        ):
+            raise BacktestConfigurationError(
+                "strategy signal identity or timestamp does not match the run"
+            )
         run_identity = {
             "strategy_name": strategy.name,
             "strategy_version": strategy.version,
@@ -356,6 +372,7 @@ class BacktestEngine(Backtester):
             "orders": tuple(orders),
             "fills": fill_tuple,
             "trades": trades,
+            "signals": strategy_signals,
             "ledger_entries": ledger.entries,
             "warnings": tuple(dict.fromkeys(warnings)),
             "benchmark": benchmark,

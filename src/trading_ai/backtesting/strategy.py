@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from decimal import Decimal
 from typing import Sequence
 
-from trading_ai.backtesting.models import OrderIntent, StrategyContext
+from trading_ai.backtesting.models import OrderIntent, StrategyContext, StrategySignal
 from trading_ai.core.models import OrderSide, OrderType
 
 
@@ -30,6 +30,12 @@ class BacktestStrategy(ABC):
 
     def reset(self) -> None:
         """Reset deterministic run state before the first market event."""
+
+    @property
+    def signals(self) -> tuple[StrategySignal, ...]:
+        """Explainable signals emitted during the current deterministic run."""
+
+        return ()
 
     @abstractmethod
     def on_bar(self, context: StrategyContext) -> Sequence[OrderIntent]:

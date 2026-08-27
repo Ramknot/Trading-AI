@@ -1,3 +1,4 @@
+import hashlib
 import json
 from datetime import datetime
 from decimal import Decimal
@@ -46,6 +47,7 @@ def test_result_export_writes_json_parquet_and_verifiable_hashes(
     assert parquet.read_table(directory / "fills.parquet").num_rows == 1
     assert parquet.read_table(directory / "trades.parquet").num_rows == 0
     assert parquet.read_table(directory / "orders.parquet").num_rows == 1
+    assert parquet.read_table(directory / "signals.parquet").num_rows == 0
     assert parquet.read_table(directory / "ledger.parquet").num_rows == 1
 
 
@@ -60,6 +62,36 @@ def test_result_store_detects_tampering(tmp_path, paper_context) -> None:
 
     with pytest.raises(BacktestStorageError, match="SHA-256 mismatch"):
         store.verify_integrity(result.run_id)
+
+
+def test_result_store_keeps_lot2_schema_1_0_exports_inspectable(
+    tmp_path, paper_context
+) -> None:
+    result = _result(paper_context)
+    store = BacktestResultStore(tmp_path / "backtests")
+    directory = store.export(result)
+    (directory / "signals.parquet").unlink()
+    summary_path = directory / "summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["schema_version"] = "1.0"
+    summary["counts"].pop("signals")
+    summary_path.write_text(
+        json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    checksums_path = directory / "checksums.json"
+    checksums = json.loads(checksums_path.read_text(encoding="utf-8"))
+    checksums["files"].pop("signals.parquet")
+    checksums["files"]["summary.json"] = hashlib.sha256(
+        summary_path.read_bytes()
+    ).hexdigest()
+    checksums_path.write_text(
+        json.dumps(checksums, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+    inspected = store.inspect(result.run_id)
+
+    assert inspected["schema_version"] == "1.0"
+    assert "signals" not in inspected["counts"]
 
 
 def test_cached_dataset_adapter_preserves_manifest_and_action_provenance(
@@ -224,3 +256,67 @@ def test_backtest_cli_cache_miss_is_controlled(tmp_path, capsys) -> None:
     assert exit_code == 2
     assert payload["status"] == "ERROR"
     assert "never download" in payload["error"]
+
+
+def test_strategy_cli_lists_versioned_non_optimized_baselines(capsys) -> None:
+    assert main(["strategy", "list", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert {item["name"] for item in payload} >= {
+        "trend",
+        "momentum",
+        "breakout",
+        "buy-and-hold",
+    }
+    trend = next(item for item in payload if item["name"] == "trend")
+    assert trend["version"] == "1.0"
+    assert "not optimized" in trend["warning"]
+
+
+def test_backtest_cli_runs_lot3_trend_from_cache_without_fetching(
+    tmp_path,
+    fake_data_provider,
+    market_start,
+    market_end,
+    capsys,
+) -> None:
+    data_root = tmp_path / "data_local"
+    DataEngine(fake_data_provider, ParquetDataStore(data_root)).fetch(
+        profile_name="balanced",
+        symbol="AAPL",
+        timeframe="1d",
+        start=market_start,
+        end=market_end,
+        cache_mode=CacheMode.REFRESH,
+    )
+
+    assert main(
+        [
+            "backtest",
+            "run",
+            "--strategy",
+            "trend",
+            "--symbol",
+            "AAPL",
+            "--timeframe",
+            "1d",
+            "--start",
+            "2024-07-01",
+            "--end",
+            "2024-07-03",
+            "--fast-window",
+            "1",
+            "--slow-window",
+            "2",
+            "--slope-lookback",
+            "1",
+            "--data-root",
+            str(data_root),
+            "--json",
+        ]
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["strategy"] == "trend"
+    assert payload["strategy_parameters"]["feature_schema_version"] == "1.0"
+    assert payload["dataset_ids"]
