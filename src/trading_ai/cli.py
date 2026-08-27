@@ -1,4 +1,4 @@
-"""Safety diagnostics and historical-data commands."""
+"""Safety diagnostics, historical-data, and offline backtest commands."""
 
 from __future__ import annotations
 
@@ -8,9 +8,21 @@ import os
 import sys
 from collections.abc import Sequence
 from datetime import datetime, time, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
+from trading_ai.backtesting.engine import BacktestEngine
+from trading_ai.backtesting.exceptions import BacktestError
+from trading_ai.backtesting.input import load_cached_dataset
+from trading_ai.backtesting.models import (
+    BacktestConfig,
+    CommissionConfig,
+    DataQualityPolicy,
+)
+from trading_ai.backtesting.storage import BacktestResultStore
+from trading_ai.backtesting.strategy import BuyAndHoldDemoStrategy
+from trading_ai.core.config import load_runtime_settings
 from trading_ai.core.exceptions import TradingAIError
 from trading_ai.core.health import HealthReport, doctor
 from trading_ai.data.engine import DataEngine
@@ -50,10 +62,20 @@ def _add_store_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true", dest="as_json")
 
 
+def _parse_decimal(value: str) -> Decimal:
+    try:
+        parsed = Decimal(value)
+    except InvalidOperation as exc:
+        raise argparse.ArgumentTypeError("expected a decimal number") from exc
+    if not parsed.is_finite():
+        raise argparse.ArgumentTypeError("decimal values must be finite")
+    return parsed
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="trading-ai",
-        description="Trading AI diagnostics and historical market data",
+        description="Trading AI diagnostics, historical data, and offline backtests",
     )
     commands = parser.add_subparsers(dest="command", required=True)
     doctor_parser = commands.add_parser(
@@ -117,6 +139,69 @@ def build_parser() -> argparse.ArgumentParser:
             "--timeframe", required=True, choices=("1h", "4h", "1d")
         )
         _add_store_arguments(command_parser)
+
+    backtest_parser = commands.add_parser(
+        "backtest", help="run or inspect deterministic offline simulations"
+    )
+    backtest_commands = backtest_parser.add_subparsers(
+        dest="backtest_command", required=True
+    )
+    run_parser = backtest_commands.add_parser(
+        "run", help="run the technical buy-and-hold demo on an exact cached dataset"
+    )
+    run_parser.add_argument(
+        "--strategy",
+        choices=("buy-and-hold",),
+        default="buy-and-hold",
+        help="technical demonstration only; not a Lot 3 strategy",
+    )
+    run_parser.add_argument("--symbol", required=True)
+    run_parser.add_argument(
+        "--timeframe", required=True, choices=("1h", "4h", "1d")
+    )
+    run_parser.add_argument("--start", required=True, type=_parse_datetime)
+    run_parser.add_argument("--end", required=True, type=_parse_datetime)
+    run_parser.add_argument(
+        "--profile", default=os.getenv("TRADING_AI_PROFILE", "balanced")
+    )
+    run_parser.add_argument(
+        "--environment", default=os.getenv("TRADING_AI_ENV", "PAPER")
+    )
+    run_parser.add_argument("--quantity", type=_parse_decimal, default=Decimal("1"))
+    run_parser.add_argument(
+        "--starting-cash", type=_parse_decimal, default=Decimal("100000")
+    )
+    run_parser.add_argument(
+        "--spread-bps", type=_parse_decimal, default=Decimal("0")
+    )
+    run_parser.add_argument(
+        "--slippage-bps", type=_parse_decimal, default=Decimal("0")
+    )
+    run_parser.add_argument(
+        "--commission-fixed", type=_parse_decimal, default=Decimal("0")
+    )
+    run_parser.add_argument(
+        "--commission-bps", type=_parse_decimal, default=Decimal("0")
+    )
+    run_parser.add_argument(
+        "--commission-minimum", type=_parse_decimal, default=Decimal("0")
+    )
+    run_parser.add_argument(
+        "--benchmark-symbol",
+        help="optional Buy & Hold benchmark; defaults to the selected symbol",
+    )
+    run_parser.add_argument(
+        "--allow-data-warnings",
+        action="store_true",
+        help="accept DataQuality WARNING datasets; FAIL is always rejected",
+    )
+    _add_store_arguments(run_parser)
+
+    inspect_backtest_parser = backtest_commands.add_parser(
+        "inspect", help="verify hashes and display an exported backtest summary"
+    )
+    inspect_backtest_parser.add_argument("--run-id", required=True)
+    _add_store_arguments(inspect_backtest_parser)
     return parser
 
 
@@ -217,6 +302,84 @@ def _run_data(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_backtest(args: argparse.Namespace) -> int:
+    result_store = BacktestResultStore(args.data_root / "backtests")
+    if args.backtest_command == "inspect":
+        print(_render_payload(result_store.inspect(args.run_id), args.as_json))
+        return 0
+    if args.backtest_command != "run":
+        raise AssertionError(f"unhandled backtest command: {args.backtest_command}")
+    settings = load_runtime_settings(args.environment, args.profile)
+    dataset = load_cached_dataset(
+        ParquetDataStore(args.data_root),
+        symbol=args.symbol,
+        timeframe=args.timeframe,
+        start=args.start,
+        end=args.end,
+    )
+    strategy = BuyAndHoldDemoStrategy(args.symbol, args.quantity)
+    config = BacktestConfig(
+        starting_cash=args.starting_cash,
+        spread_bps=args.spread_bps,
+        slippage_bps=args.slippage_bps,
+        commission=CommissionConfig(
+            fixed=args.commission_fixed,
+            percentage_bps=args.commission_bps,
+            minimum=args.commission_minimum,
+        ),
+        allow_short=False,
+        data_quality_policy=(
+            DataQualityPolicy.ALLOW_WARNINGS
+            if args.allow_data_warnings
+            else DataQualityPolicy.STRICT
+        ),
+        primary_timeframe=args.timeframe,
+        benchmark_symbol=args.benchmark_symbol or args.symbol,
+    )
+    result = BacktestEngine().run(
+        strategy,
+        (dataset,),
+        settings.context,
+        config,
+    )
+    export_directory = result_store.export(result)
+    payload = {
+        "run_id": result.run_id,
+        "status": result.status,
+        "strategy": result.strategy_name,
+        "dataset_ids": [
+            reference.dataset_id for reference in result.dataset_references
+        ],
+        "initial_cash": str(result.initial_cash),
+        "final_equity": str(result.final_equity),
+        "number_of_trades": result.metrics.number_of_trades,
+        "total_return": result.metrics.total_return,
+        "max_drawdown_pct": result.metrics.max_drawdown_pct,
+        "fees": str(result.metrics.total_commission),
+        "spread_cost": str(result.metrics.total_spread_cost),
+        "slippage_cost": str(result.metrics.total_slippage_cost),
+        "total_transaction_costs": str(
+            result.metrics.total_commission
+            + result.metrics.total_spread_cost
+            + result.metrics.total_slippage_cost
+        ),
+        "benchmark": (
+            {
+                "symbol": result.benchmark.symbol,
+                "total_return": result.benchmark.total_return,
+                "excess_return": result.benchmark.excess_return,
+            }
+            if result.benchmark is not None
+            else None
+        ),
+        "result_hash": result.result_hash,
+        "export_path": str(export_directory),
+        "warnings": list(result.warnings),
+    }
+    print(_render_payload(payload, args.as_json))
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "doctor":
@@ -226,7 +389,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "data":
             return _run_data(args)
-    except (DataError, TradingAIError, ValueError) as exc:
+        if args.command == "backtest":
+            return _run_backtest(args)
+    except (BacktestError, DataError, TradingAIError, ValueError) as exc:
         if getattr(args, "as_json", False):
             print(json.dumps({"status": "ERROR", "error": str(exc)}))
         else:

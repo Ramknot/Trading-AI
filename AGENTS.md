@@ -29,4 +29,11 @@ These rules apply to Codex and every future development agent working in this re
 - Network access must not be required by the default test suite.
 - Provider-specific objects must not leak outside `DataProvider` adapters.
 - Derived datasets must record the exact source-dataset lineage.
+- Backtests must never access future market data through normal strategy APIs.
+- Backtests must never download data implicitly.
+- Backtest results must reference the exact datasets and checksums used.
+- Transaction costs must never be silently omitted from a backtest configuration or result.
+- Raw prices and corporate actions must not be double counted.
+- Balanced backtests must not allow leverage or short selling.
+- A backtest result is not evidence of future profitability.
 - Update `PROJECT_STATE.md` when a lot changes state.

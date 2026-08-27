@@ -1,20 +1,22 @@
-"""Backtester interface."""
+"""Provider- and broker-independent Backtester contract."""
 
 from abc import ABC, abstractmethod
 from typing import Sequence
 
-from trading_ai.core.models import BacktestResult, MarketBar, TradingContext
-from trading_ai.strategies.base import Strategy
+from trading_ai.backtesting.models import BacktestConfig, BacktestDataset
+from trading_ai.backtesting.strategy import BacktestStrategy
+from trading_ai.core.models import BacktestResult, TradingContext
 
 
 class Backtester(ABC):
-    """Evaluate a strategy against historical bars without broker access."""
+    """Evaluate a strategy against validated inputs without network access."""
 
     @abstractmethod
     def run(
         self,
-        strategy: Strategy,
-        market_data: Sequence[MarketBar],
+        strategy: BacktestStrategy,
+        datasets: Sequence[BacktestDataset],
         context: TradingContext,
+        config: BacktestConfig,
     ) -> BacktestResult:
-        """Run one deterministic backtest and return a typed result envelope."""
+        """Run one deterministic chronological simulation."""

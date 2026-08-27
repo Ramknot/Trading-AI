@@ -6,7 +6,20 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Mapping
+from typing import TYPE_CHECKING, Mapping
+
+if TYPE_CHECKING:
+    from trading_ai.backtesting.models import (
+        BacktestConfig,
+        BacktestMetrics,
+        BacktestOrder,
+        BenchmarkResult,
+        DatasetReference,
+        EquityPoint,
+        Fill,
+        LedgerEntry,
+        Trade,
+    )
 
 
 class ExecutionEnvironment(str, Enum):
@@ -39,6 +52,8 @@ class OrderSide(str, Enum):
 class OrderType(str, Enum):
     MARKET = "MARKET"
     LIMIT = "LIMIT"
+    STOP = "STOP"
+    STOP_LIMIT = "STOP_LIMIT"
 
 
 class RiskDecisionStatus(str, Enum):
@@ -148,16 +163,25 @@ class OrderRequest:
     order_type: OrderType = OrderType.MARKET
     limit_price: Decimal | None = None
     strategy_decision_id: str | None = None
+    created_at: datetime | None = None
 
     def __post_init__(self) -> None:
         _require_non_empty(self.order_id, "order_id")
         _require_non_empty(self.symbol, "symbol")
         if self.quantity <= Decimal("0"):
             raise ValueError("quantity must be positive")
+        if self.order_type not in {OrderType.MARKET, OrderType.LIMIT}:
+            raise ValueError(
+                f"{self.order_type.value} is reserved for a future implementation lot"
+            )
         if self.order_type is OrderType.LIMIT and self.limit_price is None:
             raise ValueError("limit_price is required for LIMIT orders")
+        if self.order_type is not OrderType.LIMIT and self.limit_price is not None:
+            raise ValueError("limit_price is only valid for LIMIT orders")
         if self.limit_price is not None and self.limit_price <= Decimal("0"):
             raise ValueError("limit_price must be positive")
+        if self.created_at is not None:
+            _require_aware(self.created_at, "created_at")
 
 
 @dataclass(frozen=True, slots=True)
@@ -285,16 +309,77 @@ class MarketBar:
 
 @dataclass(frozen=True, slots=True)
 class BacktestResult:
-    """Small result envelope; financial metrics arrive in later lots."""
+    """Immutable, traceable output of one deterministic historical simulation."""
 
     run_id: str
+    status: str
     started_at: datetime
-    finished_at: datetime
-    metrics: Mapping[str, float]
+    completed_at: datetime
+    created_at: datetime
+    strategy_name: str
+    strategy_version: str
+    strategy_parameters: tuple[tuple[str, str], ...]
+    dataset_references: tuple[DatasetReference, ...]
+    config: BacktestConfig
+    initial_cash: Decimal
+    final_equity: Decimal
+    metrics: BacktestMetrics
+    equity_curve: tuple[EquityPoint, ...]
+    orders: tuple[BacktestOrder, ...]
+    fills: tuple[Fill, ...]
+    trades: tuple[Trade, ...]
+    ledger_entries: tuple[LedgerEntry, ...]
+    warnings: tuple[str, ...]
+    benchmark: BenchmarkResult | None
+    result_hash: str
+    code_version: str | None
+    source_hash_sha256: str
 
     def __post_init__(self) -> None:
         _require_non_empty(self.run_id, "run_id")
+        _require_non_empty(self.status, "status")
+        _require_non_empty(self.strategy_name, "strategy_name")
+        _require_non_empty(self.strategy_version, "strategy_version")
+        if tuple(sorted(self.strategy_parameters)) != self.strategy_parameters:
+            raise ValueError("strategy_parameters must be sorted")
+        parameter_names = [name for name, _ in self.strategy_parameters]
+        if len(parameter_names) != len(set(parameter_names)):
+            raise ValueError("strategy_parameters must have unique names")
+        for name, value in self.strategy_parameters:
+            _require_non_empty(name, "strategy parameter name")
+            _require_non_empty(value, "strategy parameter value")
         _require_aware(self.started_at, "started_at")
-        _require_aware(self.finished_at, "finished_at")
-        if self.finished_at < self.started_at:
-            raise ValueError("finished_at must not precede started_at")
+        _require_aware(self.completed_at, "completed_at")
+        _require_aware(self.created_at, "created_at")
+        if self.completed_at < self.started_at:
+            raise ValueError("completed_at must not precede started_at")
+        if self.initial_cash <= Decimal("0"):
+            raise ValueError("initial_cash must be positive")
+        if self.final_equity < Decimal("0"):
+            raise ValueError("final_equity must not be negative")
+        if not self.equity_curve:
+            raise ValueError("equity_curve must not be empty")
+        if self.started_at != self.equity_curve[0].timestamp:
+            raise ValueError("started_at must match the first equity point")
+        if self.completed_at != self.equity_curve[-1].timestamp:
+            raise ValueError("completed_at must match the final equity point")
+        if self.final_equity != self.equity_curve[-1].equity:
+            raise ValueError("final_equity must match the final equity point")
+        if self.metrics.final_equity != self.final_equity:
+            raise ValueError("metrics final_equity must match the result")
+        if len(self.result_hash) != 64 or any(
+            character not in "0123456789abcdef"
+            for character in self.result_hash.lower()
+        ):
+            raise ValueError("result_hash must be a SHA-256 hexadecimal digest")
+        if len(self.source_hash_sha256) != 64 or any(
+            character not in "0123456789abcdef"
+            for character in self.source_hash_sha256.lower()
+        ):
+            raise ValueError("source_hash_sha256 must be a SHA-256 digest")
+
+    @property
+    def finished_at(self) -> datetime:
+        """Compatibility alias for the original Lot 0 result model."""
+
+        return self.completed_at

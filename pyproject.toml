@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "trading-ai"
 version = "0.0.1"
-description = "Safety-first modular research and historical market-data engine"
+description = "Safety-first modular market-data and backtesting engine"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }
