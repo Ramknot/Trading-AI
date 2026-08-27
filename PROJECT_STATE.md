@@ -7,7 +7,7 @@
 - Lot 1 — Data Engine: DONE
 - Lot 2 — Backtesting Engine: DONE
 - Lot 3 — Feature Engine & Quantitative Baselines: DONE
-- Lot 4 — Risk Engine: TODO
+- Lot 4 — Balanced Risk Engine: DONE
 - Lot 5 — Regime Detector: TODO
 - Lot 6 — Machine Learning: TODO
 - Lot 7 — Portfolio Engine: TODO
@@ -30,4 +30,8 @@ Delivered: chronological look-ahead-safe simulation, next-bar MARKET and determi
 
 ## Lot 3 delivery summary
 
-Delivered: versioned shared Feature Engine with explicit warm-up and anti-look-ahead semantics; stable trend, momentum, volatility, volume, and previous-range features; exact-timestamp multi-asset relative strength; explainable immutable signals; profile-capped temporary baseline sizing; versioned Trend, Momentum, and Breakout research baselines; registry and CLI selection; feature/signal lineage in deterministic backtest results; benchmark reporting; offline synthetic tests and smoke runs. Lot 4 remains TODO and Aggressive Research remains LOCKED.
+Delivered: versioned shared Feature Engine with explicit warm-up and anti-look-ahead semantics; stable trend, momentum, volatility, volume, and previous-range features; exact-timestamp multi-asset relative strength; explainable immutable signals; profile-capped temporary baseline sizing; versioned Trend, Momentum, and Breakout research baselines; registry and CLI selection; feature/signal lineage in deterministic backtest results; benchmark reporting; offline synthetic tests and smoke runs. Aggressive Research remains LOCKED.
+
+## Lot 4 delivery summary
+
+Delivered: explicitly injected `BalancedRiskEngine` 1.0 with immutable APPROVE/REDUCE/REJECT decisions; profile-bounded TOML limits and SHA-256 provenance; cash, long-only, position-count, portfolio/single-position, concentration, exact-timestamp correlation, shared-feature volatility, and explicit trade-risk sizing guards; deterministic daily-loss/drawdown states and circuit breaker; risk-reducing exits while HALTED; pending-order risk reservations; mandatory Backtester gate with `DenyAllRiskEngine` default; decision/state metrics and backward-compatible JSON/Parquet exports; risk CLI diagnostics; offline baseline integration, safety, determinism, and tamper-detection tests. Lot 5 remains TODO and Aggressive Research remains LOCKED.

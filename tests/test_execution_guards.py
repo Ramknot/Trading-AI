@@ -22,10 +22,12 @@ from trading_ai.risk.deny_all import DenyAllRiskEngine
 class RecordingBroker(BrokerAdapter):
     def __init__(self) -> None:
         self.calls = 0
+        self.last_quantity = None
 
     def submit_approved(self, approved_order, context) -> ExecutionReceipt:
         del context
         self.calls += 1
+        self.last_quantity = approved_order.order.quantity
         return ExecutionReceipt(
             order_id=approved_order.order.order_id,
             broker_order_id="paper-1",
@@ -42,6 +44,21 @@ class AllowingRiskEngine(RiskEngine):
             status=RiskDecisionStatus.APPROVE,
             reason="test approval",
             risk_engine=type(self).__name__,
+        )
+
+
+class ReducingRiskEngine(RiskEngine):
+    def evaluate(self, order, portfolio, context) -> RiskDecision:
+        del context
+        return RiskDecision(
+            decision_id=f"reduce:{order.order_id}",
+            order_id=order.order_id,
+            status=RiskDecisionStatus.REDUCE,
+            reason="test reduction",
+            risk_engine=type(self).__name__,
+            timestamp=portfolio.as_of,
+            requested_quantity=order.quantity,
+            approved_quantity=order.quantity / 2,
         )
 
 
@@ -105,6 +122,18 @@ def test_approved_balanced_paper_uses_guarded_broker_path(
     assert result.status is ExecutionStatus.SUBMITTED
     assert broker.calls == 1
     assert result.receipt is not None
+
+
+def test_generic_execution_submits_only_the_risk_reduced_quantity(
+    order, portfolio, paper_context
+) -> None:
+    broker = RecordingBroker()
+    engine = ExecutionEngine(broker, ReducingRiskEngine())
+
+    result = engine.submit_order(order, portfolio, paper_context)
+
+    assert result.status is ExecutionStatus.SUBMITTED
+    assert broker.last_quantity == order.quantity / 2
 
 
 @pytest.mark.parametrize("component", ["strategies", "ml", "portfolio"])

@@ -1,0 +1,41 @@
+name = "aggressive"
+enabled = false
+engine_name = "aggressive-risk-locked"
+engine_version = "0.0"
+
+max_positions = 5
+max_portfolio_exposure = 0.60
+max_single_position_exposure = 0.15
+max_group_exposure = 0.30
+max_trade_risk_fraction = 0.01
+
+daily_loss_limit = 0.02
+soft_drawdown_limit = 0.05
+hard_drawdown_limit = 0.10
+risk_day_timezone = "UTC"
+
+high_correlation_threshold = 0.85
+max_highly_correlated_exposure = 0.30
+correlation_min_observations = 20
+correlation_unknown_policy = "ALLOW_WITH_WARNING"
+
+unknown_group_policy = "REJECT"
+volatility_feature_name = "rolling_vol_20"
+missing_volatility_policy = "ALLOW_WITH_WARNING"
+normal_volatility_multiplier = 1.00
+elevated_volatility_multiplier = 0.50
+extreme_volatility_multiplier = 0.00
+reduced_risk_multiplier = 0.50
+quantity_step = "0.000001"
+
+[volatility_thresholds."1h"]
+elevated = 0.015
+extreme = 0.030
+
+[volatility_thresholds."4h"]
+elevated = 0.025
+extreme = 0.050
+
+[volatility_thresholds."1d"]
+elevated = 0.040
+extreme = 0.080

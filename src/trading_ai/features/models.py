@@ -137,6 +137,37 @@ class FeatureSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
+class ReturnObservation:
+    """One realized close-to-close return known at its UTC timestamp."""
+
+    timestamp: datetime
+    value: float
+
+    def __post_init__(self) -> None:
+        _require_aware(self.timestamp, "timestamp")
+        if not isfinite(self.value):
+            raise ValueError("return value must be finite")
+
+
+@dataclass(frozen=True, slots=True)
+class ReturnSeries:
+    """Immutable point-in-time return history used by risk controls."""
+
+    symbol: str
+    timeframe: str
+    observations: tuple[ReturnObservation, ...]
+
+    def __post_init__(self) -> None:
+        if not self.symbol or not self.symbol.strip():
+            raise ValueError("symbol must not be empty")
+        if not self.timeframe or not self.timeframe.strip():
+            raise ValueError("timeframe must not be empty")
+        timestamps = [item.timestamp for item in self.observations]
+        if timestamps != sorted(timestamps) or len(timestamps) != len(set(timestamps)):
+            raise ValueError("return observations must be unique and sorted")
+
+
+@dataclass(frozen=True, slots=True)
 class RelativeStrengthValue:
     """One asset's exact-timestamp cross-sectional momentum observation."""
 

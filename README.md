@@ -1,13 +1,13 @@
 # Trading AI
 
-Trading AI is a safety-first, modular Python project for reproducible market research, paper trading, and future controlled execution. Lot 3 adds a shared Feature Engine and three explainable quantitative research baselines to the foundations, market-data pipeline, and deterministic Backtesting Engine delivered in Lots 0 through 2. It does not add optimization, a real Risk Engine, regime classification, machine learning, broker integration, or any real-order path.
+Trading AI is a safety-first, modular Python project for reproducible market research, paper trading, and future controlled execution. Lot 4 adds a deterministic Balanced Risk Engine to the foundations, market-data pipeline, Backtesting Engine, shared Feature Engine, and explainable quantitative baselines delivered in Lots 0 through 3. It does not add optimization, regime classification, machine learning, portfolio optimization, broker integration, or any real-order path.
 
 ## Safety guarantees
 
 - `DEV`, `TEST`, `PAPER`, and `LIVE` remain separate environments.
 - `balanced` is the active research/paper profile; `aggressive` remains disabled and unconditionally code-locked.
 - `LIVE` startup has no unlock mechanism.
-- Every future execution path must pass through `RiskEngine`; `DenyAllRiskEngine` remains the default and rejects every request.
+- Every order path must pass through `RiskEngine`; `DenyAllRiskEngine` remains the generic default and rejects every request. `BalancedRiskEngine` must be injected explicitly for offline simulation.
 - Strategies, ML, portfolio, and data components cannot call a broker directly.
 - Secrets, local datasets, logs, environments, and caches are excluded from version control.
 
@@ -31,7 +31,7 @@ src/trading_ai/features/          shared trend, momentum, volatility, volume, st
 src/trading_ai/strategies/        contracts, configs, sizing, registry, and Lot 3 baselines
 src/trading_ai/ml/                MLScorer contract only
 src/trading_ai/portfolio/         PortfolioEngine contract only
-src/trading_ai/risk/              mandatory RiskEngine and DenyAllRiskEngine
+src/trading_ai/risk/              mandatory gate, Balanced limits/state/guards/reporting
 src/trading_ai/execution/         sealed risk-gated ExecutionEngine
 src/trading_ai/brokers/           BrokerAdapter contract
 src/trading_ai/backtesting/
@@ -62,13 +62,14 @@ The historical-simulation flow is separate from both providers and brokers:
 DataEngine -> validated BacktestDataset -> BacktestEngine
                                            |-> FeatureEngine (past + present only)
                                            |-> BacktestStrategy (feature snapshots/signals)
-                                           |-> ExecutionModel
+                                           |-> BalancedRiskEngine (explicit)
+                                           |-> ExecutionModel (risk-approved orders only)
                                            |-> PortfolioLedger
                                            |-> MetricsEngine
                                            `-> BacktestResult / local export
 ```
 
-The simulated `OrderIntent` boundary is not permission to transmit an order. It cannot reach `BrokerAdapter`, and the real execution architecture remains guarded by the mandatory `RiskEngine` with `DenyAllRiskEngine` as its default.
+The simulated `OrderIntent` boundary is not permission to transmit an order. In baseline/CLI runs it must become an immutable `RiskDecision` before it can reach the simulated execution model. It cannot reach `BrokerAdapter`, and the generic execution architecture remains guarded by mandatory `RiskEngine` with `DenyAllRiskEngine` as its fail-closed default.
 
 ## Installation
 
@@ -80,7 +81,7 @@ python -m venv .venv
 .\.venv\Scripts\python -m pip install -e ".[dev]"
 ```
 
-Runtime dependencies remain deliberately limited to the Lot 1 set: `pandas`, `pyarrow`, `yfinance`, and `pandas-market-calendars`. Lots 2 and 3 add no dependency or external backtesting/indicator framework; features and numerical metrics use the Python standard library. `pytest` is the development dependency. Yahoo Finance is a development/research source, not a guaranteed production or live-trading feed.
+Runtime dependencies remain deliberately limited to the Lot 1 set: `pandas`, `pyarrow`, `yfinance`, and `pandas-market-calendars`. Lots 2, 3, and 4 add no dependency or external backtesting, indicator, or risk framework; features, risk controls, and numerical metrics use the Python standard library. `pytest` is the development dependency. Yahoo Finance is a development/research source, not a guaranteed production or live-trading feed.
 
 ## Data Engine
 
@@ -151,7 +152,7 @@ Every result records these assumptions through immutable `BacktestConfig` and da
 - A signal produced after processing bar `t` cannot fill on that bar. A `MARKET` order first becomes eligible on the next later bar for the same symbol/timeframe and fills completely at that bar's open before costs.
 - A `BUY LIMIT` or `SELL LIMIT` stays `PENDING` until a later bar reaches it, or until an optional eligible-bar expiry. V1 applies a deterministic full fill at the limit, not a favorable intrabar price. When spread/slippage are non-zero, the raw touch must be sufficient for the submitted limit to remain the all-in execution-price bound.
 - Spread and slippage are configurable in basis points and applied adversely to buys and sells inside `BarExecutionModel`. Commission supports a fixed amount, percentage basis points, and an optional minimum. Zero-cost reference runs remain possible. Costs are always recorded on fills and in metrics.
-- Balanced V1 is cash-only and long-only. A buy that exceeds available cash is rejected, cash cannot become negative, and a sell larger than the held position is rejected. There is no margin, leverage, shorting, market depth, realistic partial fill, latency, market impact, or order-book model.
+- Balanced V1 is cash-only and long-only. `BalancedRiskEngine` first reduces or rejects a request that exceeds available cash, position/portfolio/group limits, or an available exit quantity; the ledger independently rejects any remaining inconsistency. Cash cannot become negative. There is no margin, leverage, shorting, market depth, realistic partial fill, latency, market impact, or order-book model.
 - `STOP` and `STOP_LIMIT` enum values are reserved for future execution models but are rejected by the Lot 2 order-intent model. V1 accepts only `MARKET` and `LIMIT`.
 - Raw OHLC is used with explicit dividends and splits. `adjusted_close` is never substituted. A held long position receives an explicit dividend ledger credit; a split changes quantity and average entry price without economic PnL. Adjusted-only inputs are rejected so price adjustment and actions cannot be counted twice.
 - Gaps are never filled or forward-filled. `DataQualityReport.FAIL` always blocks a run. `WARNING` blocks under the default `STRICT` policy and may continue, with warnings preserved in the result, only under `ALLOW_WARNINGS`.
@@ -172,7 +173,7 @@ The optional `BuyAndHoldBenchmark` is a dedicated benchmark component, not an op
 
 ### Provenance, reproducibility, and exports
 
-Every `BacktestResult` records strategy name/version/parameters, feature schema/engine lineage for Lot 3 baselines, exact dataset IDs and SHA-256 checksums, corporate-action lineage, simulation config, historical start/end, optional Git commit SHA, a SHA-256 of the current Python source tree, explainable signals, orders, fills, trades, ledger entries, warnings, benchmark, and a stable run/result hash. The source hash makes an uncommitted/dirty run distinguishable even when `HEAD` still names an older commit. Technical creation time is excluded from the deterministic hash, so identical strategy parameters, source/code version, config, and datasets produce identical features, signals, orders, fills, trades, equity, metrics, run ID, and result hash.
+Every `BacktestResult` records strategy name/version/parameters, feature schema/engine lineage, exact dataset IDs and SHA-256 checksums, corporate-action lineage, simulation config, risk engine/version/config/hash, every risk decision/state transition, historical start/end, optional Git commit SHA, a SHA-256 of the current Python source tree, explainable signals, orders, fills, trades, ledger entries, warnings, benchmark, and a stable run/result hash. The source hash makes an uncommitted/dirty run distinguishable even when `HEAD` still names an older commit. Technical creation time is excluded from the deterministic hash, so identical strategy, feature, risk, source/code, simulation, and dataset inputs produce identical decisions, orders, fills, metrics, run ID, and result hash.
 
 Exports stay below the Git-ignored local tree:
 
@@ -185,6 +186,8 @@ data_local/backtests/<run_id>/
   trades.parquet
   signals.parquet
   ledger.parquet
+  risk_decisions.parquet
+  risk_states.parquet
   checksums.json
 ```
 
@@ -192,7 +195,7 @@ data_local/backtests/<run_id>/
 
 ### Lot 2 limitations
 
-Lot 2 deliberately has no strategy parameter optimization, grid search, walk-forward training, ML comparison, automatic end-of-run liquidation, or real liquidity model. Trade metrics describe closed FIFO trades; an open final position remains visible in equity and exposure but is not fabricated into a closing trade. Profile-level sizing rules such as maximum positions, maximum exposure, risk budget, and turnover budget remain responsibilities of the future Portfolio/Risk components; the simulator itself still enforces the hard Balanced cash and no-short boundaries. Multi-timeframe scheduling is reserved as described above. The ledger currently assumes every supplied price and cash amount uses one common currency; cross-currency US/European portfolios require an explicit future FX policy and must not be interpreted as currency-correct today. The current profile universe is still not point-in-time and future research may retain survivorship bias.
+Lot 2 deliberately has no strategy parameter optimization, grid search, walk-forward training, ML comparison, automatic end-of-run liquidation, or real liquidity model. Trade metrics describe closed FIFO trades; an open final position remains visible in equity and exposure but is not fabricated into a closing trade. Lot 4 now enforces maximum positions/exposure, cash, no-short, concentration, correlation, volatility, and loss/drawdown protections; allocation optimization and turnover construction remain future `PortfolioEngine` responsibilities. Multi-timeframe scheduling is reserved as described above. The ledger currently assumes every supplied price and cash amount uses one common currency; cross-currency US/European portfolios require an explicit future FX policy and must not be interpreted as currency-correct today. The current profile universe is still not point-in-time and future research may retain survivorship bias.
 
 ## Feature Engine and Quantitative Baselines
 
@@ -222,11 +225,64 @@ The production research registry exposes three versioned long-only baselines. Th
 - `momentum` (`1.0`): rank exact-common-timestamp 20-bar returns, select up to the positive top 3, and reconsider the selection every five coherent bars. Default total allocation fraction: 60%, divided equally across new targets.
 - `breakout` (`1.0`): enter when close exceeds the previous 20-bar high and exit when close falls below the previous 10-bar low. Current-bar highs/lows never define their own trigger. Default allocation fraction: 25%.
 
-Every ENTER/EXIT signal stores strategy/version, UTC timestamp, reason, strength, and exact feature values; simulated orders reference the originating signal ID. No opaque BUY/SELL action is generated. `BaselineSizer` provides only temporary total-allocation/fractional-share sizing for these research runs, split across configured symbols or momentum targets and capped by the active profile exposure ceiling. It is deliberately not named or treated as `PortfolioEngine`. The existing ledger remains authoritative for cash, no leverage, and no short positions.
+Every ENTER/EXIT signal stores strategy/version, UTC timestamp, reason, strength, and exact feature values; simulated orders reference the originating signal ID. No opaque BUY/SELL action is generated. `BaselineSizer` provides only temporary total-allocation/fractional-share proposals for these research runs. It is deliberately not named or treated as `PortfolioEngine`: **BaselineSizer proposes; RiskEngine disposes**. The Risk Engine may preserve, reduce, or reject that quantity and can never increase it; the ledger remains an independent cash/no-leverage/no-short backstop.
 
 `StrategyReport` exposes strategy parameters, trades, return, drawdown, Sharpe, turnover, benchmark return, and excess return. Multi-report comparison preserves the requested order and never declares an automatic winner. Turnover remains an observed metric, not an optimization objective.
 
-The Lot 3 strategies are research baselines, not claims of profitable trading systems. No parameter sweep, hidden winner selection, ML, regime detector, or real risk-budget logic is present. Mean Reversion is intentionally reserved for Lot 5 so it can later be conditioned on an explicit regime policy. A present-day configured universe is not point-in-time, so future results can retain survivorship bias.
+The Lot 3 strategies are research baselines, not claims of profitable trading systems. No parameter sweep, hidden winner selection, ML, or regime detector is present. Mean Reversion is intentionally reserved for Lot 5 so it can later be conditioned on an explicit regime policy. A present-day configured universe is not point-in-time, so future results can retain survivorship bias.
+
+## Balanced Risk Engine
+
+### Philosophy and mandatory gate
+
+`BalancedRiskEngine` (`balanced-risk`, version `1.0`) answers only whether an already-proposed order may add risk and, if so, the maximum permitted quantity. It does not generate signals, select assets or strategies, optimize allocations, contact data providers/brokers, or try to improve returns. Each immutable decision is one of:
+
+- `APPROVE`: the full requested quantity is accepted.
+- `REDUCE`: a positive quantity strictly below the request is accepted.
+- `REJECT`: approved quantity is zero.
+
+The invariant `0 <= approved_quantity <= requested_quantity` is validated in the domain model and again at the execution boundary. The production `BacktestEngine` defaults to `DenyAllRiskEngine`; CLI baseline runs explicitly construct the validated Balanced engine. Tests that need old permissive Lot 2 mechanics inject a test-only engine from `tests/`, which is unavailable to production and CLI code. Pending buys reserve cash/exposure and pending sells reserve exit quantity, preventing multiple same-timestamp intents from reusing the same capacity.
+
+The generic/future broker path remains fail closed. Giving it no engine uses `DenyAllRiskEngine`; giving `BalancedRiskEngine` only the older incomplete execution context also rejects. Neither risk configuration nor risk state can unlock `LIVE` or `aggressive`.
+
+### Configuration and limits
+
+Trading-profile ceilings remain in `config/profiles/balanced.toml`; finer immutable limits live in `config/risk/balanced.toml`. Startup rejects a risk configuration that exceeds the profile's maximum positions, portfolio exposure, or trade-risk budget. `config/risk/aggressive.toml` exists only for schema compatibility with `enabled = false`. `config/risk/asset_groups.toml` owns all symbol-to-group classification; no symbol is embedded in Risk Engine Python code.
+
+Balanced research defaults are:
+
+- maximum 5 open positions;
+- maximum gross portfolio exposure 60%;
+- maximum single-position exposure 15%;
+- maximum configured-group exposure 30%;
+- maximum explicit trade-risk budget 1% of current equity;
+- daily loss protection 2%, soft drawdown 5%, and hard drawdown 10%;
+- high-correlation threshold 0.85 and maximum highly-correlated exposure 30%;
+- reduced-risk multiplier 50%, UTC risk-day boundary, and timeframe-specific volatility thresholds.
+
+These values are research defaults, not optimized values or guarantees of safe trading. Risk limits reduce exposure; they do not eliminate trading risk or guarantee profitability.
+
+New entries and position increases are capped deterministically by available cash (no margin/leverage), portfolio exposure, single-position exposure, configured concentration group, correlation, volatility, state multiplier, and—when explicitly supplied—trade risk. A sixth position is rejected, while an increase to an existing position does not consume an additional position slot. Balanced sells may only reduce/close held long quantity; an oversized sell is reduced to the unreserved holding and a sell without a position is rejected.
+
+When `invalidation_price` or `risk_distance` exists, the engine computes `risk_per_share` and caps quantity to `equity * max_trade_risk_fraction / risk_per_share`. It never invents a stop. Without explicit invalidation it records `NO_EXPLICIT_RISK_DISTANCE` and continues under the other controls without claiming a precise maximum trade loss.
+
+### Volatility, concentration, and correlation
+
+The volatility guard consumes the shared Feature Engine's `rolling_vol_20`; it does not implement a competing ATR or volatility definition. Configured `NORMAL`, `ELEVATED`, and `EXTREME` bands apply multipliers of 1.0, 0.5, and 0.0 by default for new risk. Missing features follow an explicit policy; they are never interpreted as zero risk. Risk-reducing exits bypass this new-risk guard.
+
+Concentration groups and limits are configuration-driven. An unknown group is explicit and rejects under the default Balanced policy; an optional warning policy is represented in the schema. Correlation uses only already-realized returns supplied by `FeatureEngine`, aligns exact common UTC timestamps, and never forward-fills/backfills. Fewer than the configured observations yields `UNKNOWN`; Balanced defaults to `ALLOW_WITH_WARNING`, while `REJECT` remains configurable. This is an exposure guard, not covariance optimization, risk parity, or a Regime Detector.
+
+### Daily loss, drawdown, and circuit breaker
+
+`RiskStateTracker` maintains current/peak/day-start equity and deterministic `NORMAL`, `REDUCED`, or `HALTED` state. Daily return uses the configured risk-day timezone (UTC by default). A daily loss at the threshold halts new risk until the next risk day. Soft drawdown reduces new quantities. Hard drawdown latches `HALTED` across days and recoveries until an explicit reasoned reset. Manual and invalid-market-data halts are also represented; future broker-desync/latency reason codes are schema-only.
+
+`HALTED` means `STOP_NEW_RISK`: new positions and increases are rejected, but valid sells that reduce an existing long position remain possible. The engine never silently liquidates or emits `SELL EVERYTHING`; automated flattening requires a future execution/broker policy and is outside Lot 4.
+
+### Provenance and reporting
+
+Every decision records its stable ID, order ID, engine/version, status, requested/approved quantity, reason codes and explanations, state, configuration SHA-256, cash/equity, before/after exposures, loss/drawdown, and available volatility/correlation metrics. Orders retain both `signal_id` and `risk_decision_id`, producing `Signal -> Order -> RiskDecision -> Fill` lineage. The result summary includes approved/reduced/rejected counts, rejection reasons, maximum observed exposures/drawdown/daily loss, and time in protected states. Schema `1.2` exports decisions and transitions to Parquet with checksums; inspection remains compatible with Lot 2 schema `1.0` and Lot 3 schema `1.1` exports.
+
+Lot 4 remains offline and simulated. It has no FX conversion, real broker state reconciliation, order-book/liquidity impact, portfolio optimizer, automatic liquidation, regime conditioning, or proof that its limits are sufficient for live markets.
 
 ## CLI
 
@@ -235,7 +291,10 @@ Safety diagnostics remain available:
 ```powershell
 trading-ai doctor
 trading-ai doctor --environment PAPER --profile balanced --json
+trading-ai risk inspect --profile balanced --json
 ```
+
+`risk inspect` validates and displays engine/version, limits, drawdown/daily-loss rules, volatility/correlation policies, concentration groups, and the deterministic config hash. Inspecting `aggressive` reports it as locked and disabled; it does not activate it.
 
 Historical-data commands are explicit; no command downloads the full universe unless `--all` is supplied:
 
@@ -260,11 +319,11 @@ trading-ai backtest inspect --run-id bt-0123456789abcdef01234567 --json
 trading-ai strategy list --json
 ```
 
-The demo submits one buy intent. Every command uses the first selected symbol as its configurable Buy & Hold benchmark unless `--benchmark-symbol` names another cached profile symbol. Strategy-specific window/allocation flags override immutable defaults for that run, and the resolved values are stored in `BacktestResult`. `run` exports under `data_local/backtests/`; `inspect` verifies checksums before reading the summary. A cache miss fails clearly without falling back to Yahoo Finance.
+The demo submits one buy intent. Every CLI backtest explicitly uses `BalancedRiskEngine`; a missing/invalid risk configuration fails closed. Every command uses the first selected symbol as its configurable Buy & Hold benchmark unless `--benchmark-symbol` names another cached profile symbol. Strategy-specific window/allocation flags override immutable defaults for that run, and the resolved values are stored in `BacktestResult`. `run` exports under `data_local/backtests/`; `inspect` verifies checksums and includes the risk summary before reading the result. A cache miss fails clearly without falling back to Yahoo Finance.
 
 ## Tests and CI
 
-The default suite is deterministic, fast, and independent of Yahoo Finance and the network. It uses `FakeDataProvider` plus small synthetic sessions, invalid bars, gaps, corporate actions, feature warm-ups, future-append invariance, relative-strength ties/missing assets, all three baselines, execution costs, partial exits, known metric curves, and look-ahead probes.
+The default suite is deterministic, fast, and independent of Yahoo Finance and the network. It uses `FakeDataProvider` plus small synthetic sessions, invalid bars, gaps, corporate actions, feature warm-ups, future-append invariance, relative-strength ties/missing assets, all three baselines, execution costs, partial exits, known metric curves, look-ahead probes, all Balanced risk limit/status paths, state transitions, pending-order reservations, correlation alignment, tamper-evident risk exports, and safety architecture audits.
 
 ```powershell
 .\.venv\Scripts\python -m compileall -q src
@@ -294,4 +353,4 @@ Expected safety matrix:
 
 ## Roadmap
 
-Lots 0, 0.1, 1, 2, and 3 provide foundations, universe/CI alignment, historical data, deterministic simulation, shared features, and quantitative research baselines. Lot 4 is the next TODO and will address a real Risk Engine in its own reviewed scope; it has not started here. Later lots cover regime detection, ML, portfolio construction, dashboarding, and broker/paper integration. Aggressive Research remains locked. See `PROJECT_STATE.md` for the authoritative status.
+Lots 0, 0.1, 1, 2, 3, and 4 provide foundations, universe/CI alignment, historical data, deterministic simulation, shared features, quantitative research baselines, and the offline Balanced Risk Engine. Lot 5 remains TODO and will address regime detection in its own reviewed scope; no Regime Detector or Mean Reversion strategy is included here. Later lots cover ML, portfolio construction, dashboarding, and broker/paper integration. Aggressive Research remains locked. See `PROJECT_STATE.md` for the authoritative status.

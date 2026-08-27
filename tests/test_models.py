@@ -73,3 +73,29 @@ def test_portfolio_rejects_duplicate_symbols() -> None:
             total_equity=Decimal("100000"),
             positions=positions,
         )
+
+
+def test_risk_decision_cannot_increase_requested_quantity() -> None:
+    with pytest.raises(ValueError, match="never exceed"):
+        RiskDecision(
+            decision_id="risk-too-large",
+            order_id="order-1",
+            status=RiskDecisionStatus.REDUCE,
+            reason="invalid",
+            risk_engine="test",
+            requested_quantity=Decimal("1"),
+            approved_quantity=Decimal("2"),
+        )
+
+
+def test_reduce_decision_requires_strictly_smaller_positive_quantity() -> None:
+    with pytest.raises(ValueError, match="smaller positive"):
+        RiskDecision(
+            decision_id="risk-not-reduced",
+            order_id="order-1",
+            status=RiskDecisionStatus.REDUCE,
+            reason="invalid",
+            risk_engine="test",
+            requested_quantity=Decimal("1"),
+            approved_quantity=Decimal("1"),
+        )

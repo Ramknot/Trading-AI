@@ -40,7 +40,17 @@ from trading_ai.backtesting.reproducibility import (
 from trading_ai.backtesting.strategy import BacktestStrategy
 from trading_ai.backtesting.trades import reconstruct_trades
 from trading_ai.core.config import PROJECT_ROOT, load_runtime_settings
-from trading_ai.core.models import BacktestResult, MarketBar, TradingContext
+from trading_ai.core.models import (
+    BacktestResult,
+    MarketBar,
+    OrderRequest,
+    OrderSide,
+    PortfolioSnapshot,
+    Position,
+    RiskDecision,
+    RiskDecisionStatus,
+    TradingContext,
+)
 from trading_ai.data.models import (
     CorporateAction,
     DataKind,
@@ -48,6 +58,10 @@ from trading_ai.data.models import (
     QualityStatus,
     StockSplit,
 )
+from trading_ai.features import FeatureEngine, FeatureRequest
+from trading_ai.risk.base import RiskEngine
+from trading_ai.risk.deny_all import DenyAllRiskEngine
+from trading_ai.risk.models import RiskContext
 
 
 ExecutionModelFactory = Callable[[BacktestConfig], ExecutionModel]
@@ -80,13 +94,23 @@ class BacktestEngine(Backtester):
         *,
         execution_model_factory: ExecutionModelFactory | None = None,
         metrics_engine: MetricsEngine | None = None,
+        risk_engine: RiskEngine | None = None,
+        feature_engine: FeatureEngine | None = None,
         code_version: str | None = None,
     ) -> None:
         self._execution_model_factory = (
             execution_model_factory or BarExecutionModel
         )
         self._metrics_engine = metrics_engine or MetricsEngine()
+        self._risk_engine = risk_engine or DenyAllRiskEngine()
+        self._feature_engine = feature_engine or FeatureEngine()
         self._code_version = code_version
+
+    @property
+    def risk_engine(self) -> RiskEngine:
+        """Expose the mandatory gate for diagnostics without allowing bypass."""
+
+        return self._risk_engine
 
     def run(
         self,
@@ -158,11 +182,16 @@ class BacktestEngine(Backtester):
         order_indexes: dict[str, int] = {}
         pending_order_ids: list[str] = []
         fills: list[Fill] = []
+        risk_decisions: list[RiskDecision] = []
+        pending_buy_risk: dict[str, tuple[str, Decimal, Decimal]] = {}
+        pending_sell_risk: dict[str, tuple[str, Decimal]] = {}
         history: list[MarketBar] = []
         last_prices: dict[str, Decimal] = {}
         equity_curve: list[EquityPoint] = []
         action_index = 0
         strategy.reset()
+        self._feature_engine.clear_cache()
+        self._risk_engine.reset(bars[0].timestamp, config.starting_cash)
 
         for timestamp, grouped in groupby(bars, key=lambda bar: bar.timestamp):
             current_bars = tuple(grouped)
@@ -213,6 +242,8 @@ class BacktestEngine(Backtester):
                             )
                         self._replace_order(order, orders, order_indexes)
                         pending_order_ids.remove(order_id)
+                        pending_buy_risk.pop(order_id, None)
+                        pending_sell_risk.pop(order_id, None)
                         continue
                     if (
                         config.order_expiration_bars is not None
@@ -227,13 +258,19 @@ class BacktestEngine(Backtester):
                         )
                         self._replace_order(order, orders, order_indexes)
                         pending_order_ids.remove(order_id)
+                        pending_buy_risk.pop(order_id, None)
+                        pending_sell_risk.pop(order_id, None)
 
                 history.append(bar)
+                current_portfolio = ledger.snapshot(bar.timestamp, last_prices)
+                self._risk_engine.observe(
+                    bar.timestamp, current_portfolio.total_equity
+                )
                 strategy_context = StrategyContext(
                     current_time=bar.timestamp,
                     current_bar=bar,
                     history=tuple(history),
-                    portfolio=ledger.snapshot(bar.timestamp, last_prices),
+                    portfolio=current_portfolio,
                     trading_context=context,
                     profile=profile,
                 )
@@ -252,21 +289,143 @@ class BacktestEngine(Backtester):
                         raise BacktestDataError(
                             f"no supplied dataset for order series {intent.symbol} {timeframe}"
                         )
+                    order_id = f"order-{len(orders) + 1:06d}"
+                    observed_price = last_prices.get(intent.symbol)
+                    if observed_price is None:
+                        raise BacktestDataError(
+                            f"no observed price exists for risk evaluation of {intent.symbol}"
+                        )
+                    if intent.side is OrderSide.BUY:
+                        expected_entry_price = max(
+                            value
+                            for value in (
+                                observed_price,
+                                intent.expected_entry_price,
+                                intent.limit_price,
+                            )
+                            if value is not None
+                        )
+                    else:
+                        expected_entry_price = observed_price
+                    order_request = OrderRequest(
+                        order_id=order_id,
+                        symbol=intent.symbol,
+                        side=intent.side,
+                        quantity=intent.quantity,
+                        order_type=intent.order_type,
+                        limit_price=intent.limit_price,
+                        strategy_decision_id=intent.signal_id,
+                        created_at=bar.timestamp,
+                        expected_entry_price=expected_entry_price,
+                        invalidation_price=intent.invalidation_price,
+                        risk_distance=intent.risk_distance,
+                    )
+                    risk_portfolio = self._portfolio_with_pending_buys(
+                        ledger.snapshot(bar.timestamp, last_prices),
+                        pending_buy_risk,
+                    )
+                    risk_state = self._risk_engine.current_state(
+                        bar.timestamp, risk_portfolio.total_equity
+                    )
+                    series_history = tuple(
+                        item
+                        for item in history
+                        if item.symbol == intent.symbol
+                        and item.timeframe == timeframe
+                    )
+                    feature_snapshot = None
+                    if (
+                        series_history
+                        and series_history[-1].timestamp == bar.timestamp
+                    ):
+                        feature_snapshot = self._feature_engine.compute(
+                            series_history,
+                            FeatureRequest(),
+                            as_of=bar.timestamp,
+                        )
+                    return_series = self._feature_engine.return_series(
+                        history,
+                        symbols=tuple(
+                            sorted(
+                                symbol
+                                for symbol, item_timeframe in available_series
+                                if item_timeframe == timeframe
+                            )
+                        ),
+                        timeframe=timeframe,
+                        as_of=bar.timestamp,
+                    )
+                    risk_context = RiskContext(
+                        timestamp=bar.timestamp,
+                        profile=profile,
+                        portfolio=risk_portfolio,
+                        order=order_request,
+                        expected_entry_price=expected_entry_price,
+                        market_prices=tuple(sorted(last_prices.items())),
+                        risk_state=risk_state,
+                        timeframe=timeframe,
+                        feature_snapshot=feature_snapshot,
+                        return_series=return_series,
+                        pending_sell_quantities=self._pending_sell_quantities(
+                            pending_sell_risk
+                        ),
+                    )
+                    risk_decision = self._risk_engine.evaluate_context(risk_context)
+                    self._validate_risk_decision(order_request, risk_decision)
+                    risk_decisions.append(risk_decision)
+                    if risk_decision.status is RiskDecisionStatus.REJECT:
+                        order = BacktestOrder(
+                            order_id=order_id,
+                            symbol=intent.symbol,
+                            timeframe=timeframe,
+                            side=intent.side,
+                            quantity=intent.quantity,
+                            order_type=intent.order_type,
+                            created_at=bar.timestamp,
+                            limit_price=intent.limit_price,
+                            signal_id=intent.signal_id,
+                            risk_decision_id=risk_decision.decision_id,
+                            status=OrderStatus.REJECTED,
+                            status_reason=risk_decision.reason,
+                            completed_at=bar.timestamp,
+                        )
+                        order_indexes[order.order_id] = len(orders)
+                        orders.append(order)
+                        continue
+                    approved_quantity = risk_decision.approved_quantity
+                    if approved_quantity is None or approved_quantity <= Decimal("0"):
+                        raise BacktestConfigurationError(
+                            "approved risk decision requires a positive approved_quantity"
+                        )
                     order = BacktestOrder(
-                        order_id=f"order-{len(orders) + 1:06d}",
+                        order_id=order_id,
                         symbol=intent.symbol,
                         timeframe=timeframe,
                         side=intent.side,
-                        quantity=intent.quantity,
+                        quantity=approved_quantity,
                         order_type=intent.order_type,
                         created_at=bar.timestamp,
                         limit_price=intent.limit_price,
                         signal_id=intent.signal_id,
+                        risk_decision_id=risk_decision.decision_id,
                     )
                     order_indexes[order.order_id] = len(orders)
                     orders.append(order)
                     pending_order_ids.append(order.order_id)
-            equity_curve.append(ledger.equity_point(timestamp, last_prices))
+                    if order.side is OrderSide.BUY:
+                        pending_buy_risk[order.order_id] = (
+                            order.symbol,
+                            order.quantity,
+                            expected_entry_price,
+                        )
+                    else:
+                        pending_sell_risk[order.order_id] = (
+                            order.symbol,
+                            order.quantity,
+                        )
+            equity_point = ledger.equity_point(timestamp, last_prices)
+            equity_curve.append(equity_point)
+            self._risk_engine.observe(timestamp, equity_point.equity)
 
         if action_index < len(actions):
             warnings.append(
@@ -283,6 +442,10 @@ class BacktestEngine(Backtester):
         )
         trades = reconstruct_trades(fill_tuple, applied_actions)
         curve_tuple = tuple(equity_curve)
+        risk_decision_tuple = tuple(risk_decisions)
+        risk_summary = self._risk_engine.summary(
+            risk_decision_tuple, bars[-1].timestamp
+        )
         metrics = self._metrics_engine.calculate(
             initial_capital=config.starting_cash,
             curve=curve_tuple,
@@ -351,6 +514,10 @@ class BacktestEngine(Backtester):
             "context": context,
             "code_version": code_version,
             "source_hash_sha256": source_hash,
+            "risk_engine_name": self._risk_engine.engine_name,
+            "risk_engine_version": self._risk_engine.engine_version,
+            "risk_config": self._risk_engine.config_parameters,
+            "risk_config_hash": self._risk_engine.config_hash,
         }
         run_id = f"bt-{stable_hash(run_identity)[:24]}"
         created_at = datetime.now(timezone.utc)
@@ -378,6 +545,13 @@ class BacktestEngine(Backtester):
             "benchmark": benchmark,
             "code_version": code_version,
             "source_hash_sha256": source_hash,
+            "risk_engine_name": self._risk_engine.engine_name,
+            "risk_engine_version": self._risk_engine.engine_version,
+            "risk_config": self._risk_engine.config_parameters,
+            "risk_config_hash": self._risk_engine.config_hash,
+            "risk_decisions": risk_decision_tuple,
+            "risk_state_transitions": self._risk_engine.state_transitions,
+            "risk_summary": risk_summary,
         }
         result_values["result_hash"] = stable_result_hash(result_values)
         return BacktestResult(**result_values)
@@ -389,6 +563,67 @@ class BacktestEngine(Backtester):
         order_indexes: dict[str, int],
     ) -> None:
         orders[order_indexes[order.order_id]] = order
+
+    @staticmethod
+    def _validate_risk_decision(
+        order: OrderRequest, decision: RiskDecision
+    ) -> None:
+        if not isinstance(decision, RiskDecision):
+            raise BacktestConfigurationError("RiskEngine must return RiskDecision")
+        if decision.order_id != order.order_id:
+            raise BacktestConfigurationError(
+                "RiskEngine returned a decision for another order"
+            )
+        if decision.requested_quantity != order.quantity:
+            raise BacktestConfigurationError(
+                "RiskDecision must record the exact requested quantity"
+            )
+        if (
+            decision.approved_quantity is None
+            or decision.approved_quantity > order.quantity
+        ):
+            raise BacktestConfigurationError(
+                "RiskEngine may never increase or omit approved quantity"
+            )
+
+    @staticmethod
+    def _portfolio_with_pending_buys(
+        portfolio: PortfolioSnapshot,
+        reservations: dict[str, tuple[str, Decimal, Decimal]],
+    ) -> PortfolioSnapshot:
+        quantities: dict[str, tuple[Decimal, Decimal]] = {
+            item.symbol: (item.quantity, item.average_price)
+            for item in portfolio.positions
+        }
+        reserved_cost = Decimal("0")
+        for symbol, quantity, price in reservations.values():
+            held, average = quantities.get(symbol, (Decimal("0"), price))
+            combined = held + quantity
+            combined_average = (
+                (held * average + quantity * price) / combined
+                if combined > Decimal("0")
+                else price
+            )
+            quantities[symbol] = (combined, combined_average)
+            reserved_cost += quantity * price
+        return PortfolioSnapshot(
+            as_of=portfolio.as_of,
+            cash=max(Decimal("0"), portfolio.cash - reserved_cost),
+            total_equity=portfolio.total_equity,
+            positions=tuple(
+                Position(symbol, quantity, average)
+                for symbol, (quantity, average) in sorted(quantities.items())
+            ),
+        )
+
+    @staticmethod
+    def _pending_sell_quantities(
+        reservations: dict[str, tuple[str, Decimal]],
+    ) -> tuple[tuple[str, Decimal], ...]:
+        by_symbol: dict[str, Decimal] = {}
+        for symbol, quantity in reservations.values():
+            by_symbol[symbol] = by_symbol.get(symbol, Decimal("0")) + quantity
+        return tuple(sorted(by_symbol.items()))
 
     @staticmethod
     def _validate_datasets(

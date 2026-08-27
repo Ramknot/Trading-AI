@@ -13,7 +13,7 @@ from trading_ai.backtesting.reproducibility import to_primitive
 from trading_ai.core.models import BacktestResult
 
 
-RESULT_SCHEMA_VERSION = "1.1"
+RESULT_SCHEMA_VERSION = "1.2"
 _SAFE_RUN_ID = re.compile(r"^[A-Za-z0-9_-]+$")
 _EXPORTED_FILES = frozenset(
     {
@@ -24,9 +24,15 @@ _EXPORTED_FILES = frozenset(
         "trades.parquet",
         "signals.parquet",
         "ledger.parquet",
+        "risk_decisions.parquet",
+        "risk_states.parquet",
     }
 )
-_LOT2_EXPORTED_FILES = _EXPORTED_FILES - {"signals.parquet"}
+_LOT3_EXPORTED_FILES = _EXPORTED_FILES - {
+    "risk_decisions.parquet",
+    "risk_states.parquet",
+}
+_LOT2_EXPORTED_FILES = _LOT3_EXPORTED_FILES - {"signals.parquet"}
 
 
 def _sha256_file(path: Path) -> str:
@@ -157,6 +163,56 @@ class BacktestResultStore:
                 ("completed_at", pa.string()),
                 ("eligible_bar_count", pa.int64()),
                 ("signal_id", pa.string()),
+                ("risk_decision_id", pa.string()),
+            ]
+        )
+
+    @staticmethod
+    def _risk_decision_schema():
+        import pyarrow as pa
+
+        return pa.schema(
+            [
+                ("decision_id", pa.string()),
+                ("order_id", pa.string()),
+                ("status", pa.string()),
+                ("reason", pa.string()),
+                ("risk_engine", pa.string()),
+                ("timestamp", pa.string()),
+                ("engine_version", pa.string()),
+                ("requested_quantity", pa.string()),
+                ("approved_quantity", pa.string()),
+                ("reason_codes", pa.list_(pa.string())),
+                ("human_readable_reasons", pa.list_(pa.string())),
+                ("risk_state", pa.string()),
+                ("config_hash", pa.string()),
+                ("equity", pa.string()),
+                ("cash", pa.string()),
+                ("gross_exposure_before", pa.float64()),
+                ("gross_exposure_after", pa.float64()),
+                ("position_exposure_before", pa.float64()),
+                ("position_exposure_after", pa.float64()),
+                ("daily_loss_pct", pa.float64()),
+                ("drawdown_pct", pa.float64()),
+                ("volatility_metric", pa.float64()),
+                ("correlation_metric", pa.float64()),
+            ]
+        )
+
+    @staticmethod
+    def _risk_state_schema():
+        import pyarrow as pa
+
+        return pa.schema(
+            [
+                ("transition_id", pa.string()),
+                ("timestamp", pa.string()),
+                ("previous_state", pa.string()),
+                ("new_state", pa.string()),
+                ("reason", pa.string()),
+                ("equity", pa.string()),
+                ("daily_loss_pct", pa.float64()),
+                ("drawdown_pct", pa.float64()),
             ]
         )
 
@@ -230,6 +286,13 @@ class BacktestResultStore:
                 "result_hash": result.result_hash,
                 "code_version": result.code_version,
                 "source_hash_sha256": result.source_hash_sha256,
+                "risk": {
+                    "engine_name": result.risk_engine_name,
+                    "engine_version": result.risk_engine_version,
+                    "config": result.risk_config,
+                    "config_hash": result.risk_config_hash,
+                    "summary": result.risk_summary,
+                },
                 "counts": {
                     "equity_points": len(result.equity_curve),
                     "orders": len(result.orders),
@@ -237,6 +300,8 @@ class BacktestResultStore:
                     "trades": len(result.trades),
                     "signals": len(result.signals),
                     "ledger_entries": len(result.ledger_entries),
+                    "risk_decisions": len(result.risk_decisions),
+                    "risk_state_transitions": len(result.risk_state_transitions),
                 },
             }
         )
@@ -276,6 +341,19 @@ class BacktestResultStore:
                 (to_primitive(entry) for entry in result.ledger_entries),
                 self._ledger_schema(),
             )
+            self._write_parquet(
+                directory / "risk_decisions.parquet",
+                (to_primitive(decision) for decision in result.risk_decisions),
+                self._risk_decision_schema(),
+            )
+            self._write_parquet(
+                directory / "risk_states.parquet",
+                (
+                    to_primitive(transition)
+                    for transition in result.risk_state_transitions
+                ),
+                self._risk_state_schema(),
+            )
             checksums = {
                 name: _sha256_file(directory / name)
                 for name in sorted(_EXPORTED_FILES)
@@ -303,7 +381,11 @@ class BacktestResultStore:
                 (directory / "checksums.json").read_text(encoding="utf-8")
             )
             exported_files = frozenset(payload["files"])
-            if exported_files not in {_EXPORTED_FILES, _LOT2_EXPORTED_FILES}:
+            if exported_files not in {
+                _EXPORTED_FILES,
+                _LOT3_EXPORTED_FILES,
+                _LOT2_EXPORTED_FILES,
+            }:
                 raise BacktestStorageError(
                     "backtest checksum manifest has an unexpected file set"
                 )
@@ -325,6 +407,7 @@ class BacktestResultStore:
             )
             expected_files = {
                 "1.0": _LOT2_EXPORTED_FILES,
+                "1.1": _LOT3_EXPORTED_FILES,
                 RESULT_SCHEMA_VERSION: _EXPORTED_FILES,
             }.get(summary.get("schema_version"))
             if expected_files is None or exported_files != expected_files:

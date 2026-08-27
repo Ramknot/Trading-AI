@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from trading_ai.brokers.base import BrokerAdapter
 from trading_ai.core.models import (
     ExecutionEnvironment,
@@ -79,7 +81,14 @@ class ExecutionEngine:
                 message="aggressive execution is locked in Lot 0",
                 risk_decision=decision,
             )
-        approved_order = RiskApprovedOrder(order=order, risk_decision=decision)
+        submitted_order = order
+        if decision.status is RiskDecisionStatus.REDUCE:
+            if decision.approved_quantity is None:
+                raise ValueError("REDUCE decision omitted approved_quantity")
+            submitted_order = replace(order, quantity=decision.approved_quantity)
+        approved_order = RiskApprovedOrder(
+            order=submitted_order, risk_decision=decision
+        )
         receipt = self._broker.submit_approved(approved_order, context)
         return ExecutionResult(
             order_id=order.order_id,
@@ -97,3 +106,8 @@ class ExecutionEngine:
             raise TypeError("RiskEngine must return RiskDecision")
         if decision.order_id != order.order_id:
             raise ValueError("RiskEngine returned a decision for another order")
+        if (
+            decision.approved_quantity is not None
+            and decision.approved_quantity > order.quantity
+        ):
+            raise ValueError("RiskEngine may never increase requested quantity")

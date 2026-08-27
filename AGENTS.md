@@ -43,4 +43,15 @@ These rules apply to Codex and every future development agent working in this re
 - Mean Reversion is reserved for the Regime Detector lot.
 - Machine learning must not be introduced before the dedicated ML lot.
 - Strategy defaults are research baselines, not optimized parameters.
+- The Risk Engine must never increase a requested position size.
+- Risk-reducing exits must remain possible when new risk is halted.
+- A missing critical risk input must never be interpreted as zero risk.
+- Risk limits must not be optimized solely to improve historical performance.
+- The default execution and backtest paths must remain fail-closed with `DenyAllRiskEngine`; `BalancedRiskEngine` requires explicit validated injection.
+- `BalancedRiskEngine` must not unlock `LIVE` or aggressive profiles.
+- Risk engines must not generate trading signals.
+- Risk engines must not contact brokers or data providers.
+- Circuit breakers must stop new risk, not silently liquidate portfolios.
+- Every approved simulated order must reference an immutable `RiskDecision`.
+- Pending orders must reserve their risk capacity so concurrent intents cannot reuse cash, exposure, or exit quantity.
 - Update `PROJECT_STATE.md` when a lot changes state.

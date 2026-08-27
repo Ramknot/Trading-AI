@@ -21,6 +21,7 @@ if TYPE_CHECKING:
         StrategySignal,
         Trade,
     )
+    from trading_ai.risk.models import RiskStateTransition, RiskSummary
 
 
 class ExecutionEnvironment(str, Enum):
@@ -59,6 +60,7 @@ class OrderType(str, Enum):
 
 class RiskDecisionStatus(str, Enum):
     APPROVE = "APPROVE"
+    REDUCE = "REDUCE"
     REJECT = "REJECT"
 
 
@@ -165,11 +167,14 @@ class OrderRequest:
     limit_price: Decimal | None = None
     strategy_decision_id: str | None = None
     created_at: datetime | None = None
+    expected_entry_price: Decimal | None = None
+    invalidation_price: Decimal | None = None
+    risk_distance: Decimal | None = None
 
     def __post_init__(self) -> None:
         _require_non_empty(self.order_id, "order_id")
         _require_non_empty(self.symbol, "symbol")
-        if self.quantity <= Decimal("0"):
+        if not self.quantity.is_finite() or self.quantity <= Decimal("0"):
             raise ValueError("quantity must be positive")
         if self.order_type not in {OrderType.MARKET, OrderType.LIMIT}:
             raise ValueError(
@@ -183,6 +188,16 @@ class OrderRequest:
             raise ValueError("limit_price must be positive")
         if self.created_at is not None:
             _require_aware(self.created_at, "created_at")
+        for field_name in (
+            "expected_entry_price",
+            "invalidation_price",
+            "risk_distance",
+        ):
+            value = getattr(self, field_name)
+            if value is not None and (not value.is_finite() or value <= Decimal("0")):
+                raise ValueError(f"{field_name} must be positive and finite")
+        if self.invalidation_price is not None and self.risk_distance is not None:
+            raise ValueError("provide invalidation_price or risk_distance, not both")
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,12 +241,95 @@ class RiskDecision:
     status: RiskDecisionStatus
     reason: str
     risk_engine: str
+    timestamp: datetime | None = None
+    engine_version: str = "0"
+    requested_quantity: Decimal | None = None
+    approved_quantity: Decimal | None = None
+    reason_codes: tuple[str, ...] = ()
+    human_readable_reasons: tuple[str, ...] = ()
+    risk_state: str | None = None
+    config_hash: str | None = None
+    equity: Decimal | None = None
+    cash: Decimal | None = None
+    gross_exposure_before: float | None = None
+    gross_exposure_after: float | None = None
+    position_exposure_before: float | None = None
+    position_exposure_after: float | None = None
+    daily_loss_pct: float | None = None
+    drawdown_pct: float | None = None
+    volatility_metric: float | None = None
+    correlation_metric: float | None = None
 
     def __post_init__(self) -> None:
         _require_non_empty(self.decision_id, "decision_id")
         _require_non_empty(self.order_id, "order_id")
         _require_non_empty(self.reason, "reason")
         _require_non_empty(self.risk_engine, "risk_engine")
+        _require_non_empty(self.engine_version, "engine_version")
+        if self.timestamp is not None:
+            _require_aware(self.timestamp, "timestamp")
+        if (self.requested_quantity is None) != (self.approved_quantity is None):
+            raise ValueError(
+                "requested_quantity and approved_quantity must be recorded together"
+            )
+        if self.requested_quantity is not None:
+            if (
+                not self.requested_quantity.is_finite()
+                or self.requested_quantity <= Decimal("0")
+            ):
+                raise ValueError("requested_quantity must be positive and finite")
+            if (
+                not self.approved_quantity.is_finite()
+                or self.approved_quantity < Decimal("0")
+                or self.approved_quantity > self.requested_quantity
+            ):
+                raise ValueError(
+                    "approved_quantity must be finite, non-negative, and never exceed requested_quantity"
+                )
+            if (
+                self.status is RiskDecisionStatus.APPROVE
+                and self.approved_quantity != self.requested_quantity
+            ):
+                raise ValueError("APPROVE must accept the full requested quantity")
+            if self.status is RiskDecisionStatus.REDUCE and not (
+                Decimal("0") < self.approved_quantity < self.requested_quantity
+            ):
+                raise ValueError("REDUCE must authorize a smaller positive quantity")
+            if (
+                self.status is RiskDecisionStatus.REJECT
+                and self.approved_quantity != Decimal("0")
+            ):
+                raise ValueError("REJECT must authorize zero quantity")
+        if self.status is RiskDecisionStatus.REDUCE and self.requested_quantity is None:
+            raise ValueError("REDUCE requires requested and approved quantities")
+        if len(self.reason_codes) != len(set(self.reason_codes)):
+            raise ValueError("risk reason_codes must be unique")
+        if any(not value.strip() for value in self.reason_codes):
+            raise ValueError("risk reason_codes must not be empty")
+        if any(not value.strip() for value in self.human_readable_reasons):
+            raise ValueError("risk reasons must not be empty")
+        if self.config_hash is not None and (
+            len(self.config_hash) != 64
+            or any(character not in "0123456789abcdef" for character in self.config_hash.lower())
+        ):
+            raise ValueError("config_hash must be a SHA-256 hexadecimal digest")
+        for field_name in (
+            "gross_exposure_before",
+            "gross_exposure_after",
+            "position_exposure_before",
+            "position_exposure_after",
+            "daily_loss_pct",
+            "drawdown_pct",
+        ):
+            value = getattr(self, field_name)
+            if value is not None and value < 0:
+                raise ValueError(f"{field_name} must not be negative")
+
+    @property
+    def engine_name(self) -> str:
+        """Stable alias retained while the original field remains compatible."""
+
+        return self.risk_engine
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,10 +340,18 @@ class RiskApprovedOrder:
     risk_decision: RiskDecision
 
     def __post_init__(self) -> None:
-        if self.risk_decision.status is not RiskDecisionStatus.APPROVE:
-            raise ValueError("only approved risk decisions may create this envelope")
+        if self.risk_decision.status not in {
+            RiskDecisionStatus.APPROVE,
+            RiskDecisionStatus.REDUCE,
+        }:
+            raise ValueError("only approved or reduced decisions may create this envelope")
         if self.risk_decision.order_id != self.order.order_id:
             raise ValueError("risk decision and order IDs must match")
+        if (
+            self.risk_decision.approved_quantity is not None
+            and self.risk_decision.approved_quantity != self.order.quantity
+        ):
+            raise ValueError("order quantity must match the risk-approved quantity")
 
 
 @dataclass(frozen=True, slots=True)
@@ -336,6 +442,13 @@ class BacktestResult:
     result_hash: str
     code_version: str | None
     source_hash_sha256: str
+    risk_engine_name: str = "DenyAllRiskEngine"
+    risk_engine_version: str = "0"
+    risk_config: tuple[tuple[str, str], ...] = ()
+    risk_config_hash: str = "0" * 64
+    risk_decisions: tuple[RiskDecision, ...] = ()
+    risk_state_transitions: tuple[RiskStateTransition, ...] = ()
+    risk_summary: RiskSummary | None = None
 
     def __post_init__(self) -> None:
         _require_non_empty(self.run_id, "run_id")
@@ -379,6 +492,21 @@ class BacktestResult:
             for character in self.source_hash_sha256.lower()
         ):
             raise ValueError("source_hash_sha256 must be a SHA-256 digest")
+        _require_non_empty(self.risk_engine_name, "risk_engine_name")
+        _require_non_empty(self.risk_engine_version, "risk_engine_version")
+        if tuple(sorted(self.risk_config)) != self.risk_config:
+            raise ValueError("risk_config must be deterministically sorted")
+        if len(self.risk_config_hash) != 64 or any(
+            character not in "0123456789abcdef"
+            for character in self.risk_config_hash.lower()
+        ):
+            raise ValueError("risk_config_hash must be a SHA-256 digest")
+        decision_ids = [decision.decision_id for decision in self.risk_decisions]
+        if len(decision_ids) != len(set(decision_ids)):
+            raise ValueError("risk decision IDs must be unique")
+        order_ids = {order.order_id for order in self.orders}
+        if any(decision.order_id not in order_ids for decision in self.risk_decisions):
+            raise ValueError("every risk decision must reference a result order")
         signal_ids = [signal.signal_id for signal in self.signals]
         if len(signal_ids) != len(set(signal_ids)):
             raise ValueError("strategy signal IDs must be unique")
@@ -387,6 +515,21 @@ class BacktestResult:
             for order in self.orders
         ):
             raise ValueError("every linked order must reference a result signal")
+        risk_ids = set(decision_ids)
+        if self.risk_decisions and any(
+            order.risk_decision_id is None for order in self.orders
+        ):
+            raise ValueError("every simulated order requires a RiskDecision")
+        if any(
+            order.risk_decision_id is not None
+            and order.risk_decision_id not in risk_ids
+            for order in self.orders
+        ):
+            raise ValueError("every linked order must reference a result risk decision")
+        if self.risk_decisions and {
+            decision.order_id for decision in self.risk_decisions
+        } != order_ids:
+            raise ValueError("every simulated order requires exactly one risk decision")
 
     @property
     def finished_at(self) -> datetime:

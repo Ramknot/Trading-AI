@@ -10,6 +10,8 @@ from trading_ai.features.models import (
     FeatureValue,
     RelativeStrengthSnapshot,
     RelativeStrengthValue,
+    ReturnObservation,
+    ReturnSeries,
 )
 
 __all__ = [
@@ -23,4 +25,6 @@ __all__ = [
     "FeatureValue",
     "RelativeStrengthSnapshot",
     "RelativeStrengthValue",
+    "ReturnObservation",
+    "ReturnSeries",
 ]

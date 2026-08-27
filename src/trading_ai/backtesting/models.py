@@ -269,6 +269,9 @@ class OrderIntent:
     limit_price: Decimal | None = None
     timeframe: str | None = None
     signal_id: str | None = None
+    expected_entry_price: Decimal | None = None
+    invalidation_price: Decimal | None = None
+    risk_distance: Decimal | None = None
 
     def __post_init__(self) -> None:
         _require_text(self.symbol, "symbol")
@@ -287,6 +290,16 @@ class OrderIntent:
             _require_text(self.timeframe, "timeframe")
         if self.signal_id is not None:
             _require_text(self.signal_id, "signal_id")
+        for field_name in (
+            "expected_entry_price",
+            "invalidation_price",
+            "risk_distance",
+        ):
+            value = getattr(self, field_name)
+            if value is not None and (not value.is_finite() or value <= ZERO):
+                raise ValueError(f"{field_name} must be positive and finite")
+        if self.invalidation_price is not None and self.risk_distance is not None:
+            raise ValueError("provide invalidation_price or risk_distance, not both")
 
 
 @dataclass(frozen=True, slots=True)
@@ -337,6 +350,7 @@ class BacktestOrder:
     order_type: OrderType
     created_at: datetime
     signal_id: str | None = None
+    risk_decision_id: str | None = None
     status: OrderStatus = OrderStatus.PENDING
     limit_price: Decimal | None = None
     status_reason: str | None = None
@@ -350,6 +364,8 @@ class BacktestOrder:
         _require_aware(self.created_at, "created_at")
         if self.signal_id is not None:
             _require_text(self.signal_id, "signal_id")
+        if self.risk_decision_id is not None:
+            _require_text(self.risk_decision_id, "risk_decision_id")
         if self.completed_at is not None:
             _require_aware(self.completed_at, "completed_at")
         if self.quantity <= ZERO:

@@ -14,6 +14,8 @@ from trading_ai.features.models import (
     FeatureSnapshot,
     FeatureValue,
     RelativeStrengthSnapshot,
+    ReturnObservation,
+    ReturnSeries,
 )
 from trading_ai.features.momentum import (
     rate_of_change,
@@ -215,6 +217,58 @@ class FeatureEngine:
             values=relative_strength_values(returns_by_symbol),
             missing_symbols=tuple(missing),
         )
+
+    def return_series(
+        self,
+        history: Sequence[MarketBar],
+        *,
+        symbols: Sequence[str],
+        timeframe: str,
+        as_of: datetime,
+    ) -> tuple[ReturnSeries, ...]:
+        """Build exact-timestamp returns without filling or future access.
+
+        This shared Feature Engine definition is the only return calculation
+        consumed by the correlation risk guard. Each observation is labelled
+        with the current bar timestamp and requires a real preceding bar for
+        the same symbol and timeframe.
+        """
+
+        if as_of.tzinfo is None or as_of.utcoffset() is None:
+            raise FeatureInputError("as_of must be timezone-aware")
+        normalized_symbols = tuple(sorted(set(symbols)))
+        if not normalized_symbols or any(not symbol.strip() for symbol in normalized_symbols):
+            raise ValueError("symbols must contain non-empty values")
+        if not timeframe.strip():
+            raise ValueError("timeframe must not be empty")
+
+        grouped: dict[str, list[MarketBar]] = {
+            symbol: [] for symbol in normalized_symbols
+        }
+        for bar in history:
+            if (
+                bar.symbol in grouped
+                and bar.timeframe == timeframe
+                and bar.timestamp <= as_of
+            ):
+                grouped[bar.symbol].append(bar)
+
+        result: list[ReturnSeries] = []
+        for symbol in normalized_symbols:
+            bars = tuple(grouped[symbol])
+            if not bars:
+                result.append(ReturnSeries(symbol, timeframe, ()))
+                continue
+            validated = self._validated_history(bars)
+            observations = tuple(
+                ReturnObservation(
+                    timestamp=current.timestamp,
+                    value=float(current.close / previous.close - 1),
+                )
+                for previous, current in zip(validated, validated[1:])
+            )
+            result.append(ReturnSeries(symbol, timeframe, observations))
+        return tuple(result)
 
     @staticmethod
     def _validated_history(

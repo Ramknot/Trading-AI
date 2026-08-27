@@ -7,7 +7,7 @@ from decimal import Decimal
 import pytest
 
 from backtest_support import START, bar, dataset
-from trading_ai.backtesting.engine import BacktestEngine
+from risk_support import PermissiveBacktestEngine as BacktestEngine
 from trading_ai.backtesting.exceptions import (
     BacktestConfigurationError,
     BacktestDataError,

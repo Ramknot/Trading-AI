@@ -22,7 +22,7 @@ from trading_ai.backtesting.models import (
 )
 from trading_ai.backtesting.storage import BacktestResultStore
 from trading_ai.backtesting.strategy import BuyAndHoldDemoStrategy
-from trading_ai.core.config import load_runtime_settings
+from trading_ai.core.config import inspect_profile, load_runtime_settings
 from trading_ai.core.exceptions import TradingAIError
 from trading_ai.core.health import HealthReport, doctor
 from trading_ai.data.engine import DataEngine
@@ -30,6 +30,13 @@ from trading_ai.data.exceptions import DataError
 from trading_ai.data.models import CacheMode, DataFetchResult, DatasetInspection
 from trading_ai.data.providers import YahooFinanceProvider
 from trading_ai.data.storage import ParquetDataStore
+from trading_ai.risk.balanced import BalancedRiskEngine
+from trading_ai.risk.config import (
+    inspect_risk_config,
+    load_asset_groups,
+    load_balanced_risk_config,
+    risk_config_hash,
+)
 from trading_ai.strategies.config import (
     BreakoutConfig,
     MomentumConfig,
@@ -234,6 +241,20 @@ def build_parser() -> argparse.ArgumentParser:
         "list", help="list baseline versions and non-optimized defaults"
     )
     strategy_list.add_argument("--json", action="store_true", dest="as_json")
+
+    risk_parser = commands.add_parser(
+        "risk", help="inspect offline risk configuration and safety limits"
+    )
+    risk_commands = risk_parser.add_subparsers(
+        dest="risk_command", required=True
+    )
+    risk_inspect = risk_commands.add_parser(
+        "inspect", help="validate and display one profile's risk configuration"
+    )
+    risk_inspect.add_argument(
+        "--profile", default=os.getenv("TRADING_AI_PROFILE", "balanced")
+    )
+    risk_inspect.add_argument("--json", action="store_true", dest="as_json")
     return parser
 
 
@@ -407,6 +428,71 @@ def _run_strategy(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_risk(args: argparse.Namespace) -> int:
+    if args.risk_command != "inspect":
+        raise AssertionError(f"unhandled risk command: {args.risk_command}")
+    profile = inspect_profile(args.profile)
+    config = inspect_risk_config(profile.name)
+    groups = load_asset_groups()
+    locked = profile.name.value == "aggressive" or not profile.enabled or not config.enabled
+    if not locked:
+        config, groups = load_balanced_risk_config(profile)
+    payload = {
+        "engine": config.engine_name,
+        "version": config.engine_version,
+        "enabled": config.enabled,
+        "profile": profile.name.value,
+        "profile_enabled": profile.enabled,
+        "locked": locked,
+        "config_hash": risk_config_hash(config, groups),
+        "limits": {
+            "max_positions": config.max_positions,
+            "max_portfolio_exposure": str(config.max_portfolio_exposure),
+            "max_single_position_exposure": str(
+                config.max_single_position_exposure
+            ),
+            "max_group_exposure": str(config.max_group_exposure),
+            "max_trade_risk_fraction": str(config.max_trade_risk_fraction),
+        },
+        "drawdown": {
+            "soft_limit": str(config.soft_drawdown_limit),
+            "hard_limit": str(config.hard_drawdown_limit),
+            "reduced_multiplier": str(config.reduced_risk_multiplier),
+        },
+        "daily_loss": {
+            "limit": str(config.daily_loss_limit),
+            "risk_day_timezone": config.risk_day_timezone,
+        },
+        "correlation": {
+            "threshold": str(config.high_correlation_threshold),
+            "max_correlated_exposure": str(
+                config.max_highly_correlated_exposure
+            ),
+            "minimum_observations": config.correlation_min_observations,
+            "unknown_policy": config.correlation_unknown_policy.value,
+        },
+        "volatility": {
+            "feature": config.volatility_feature_name,
+            "missing_policy": config.missing_volatility_policy.value,
+            "thresholds": {
+                item.timeframe: {
+                    "elevated": str(item.elevated),
+                    "extreme": str(item.extreme),
+                }
+                for item in config.volatility_thresholds
+            },
+        },
+        "asset_groups": {
+            name: list(symbols) for name, symbols in groups.groups
+        },
+        "warning": (
+            "research defaults reduce exposure; they do not guarantee safety or profitability"
+        ),
+    }
+    print(_render_payload(payload, args.as_json))
+    return 0
+
+
 def _run_backtest(args: argparse.Namespace) -> int:
     result_store = BacktestResultStore(args.data_root / "backtests")
     if args.backtest_command == "inspect":
@@ -467,7 +553,8 @@ def _run_backtest(args: argparse.Namespace) -> int:
         primary_timeframe=args.timeframe,
         benchmark_symbol=benchmark_symbol,
     )
-    result = BacktestEngine().run(
+    risk_engine = BalancedRiskEngine.from_profile(settings.profile)
+    result = BacktestEngine(risk_engine=risk_engine).run(
         strategy,
         datasets,
         settings.context,
@@ -505,6 +592,18 @@ def _run_backtest(args: argparse.Namespace) -> int:
             else None
         ),
         "result_hash": result.result_hash,
+        "risk": {
+            "engine": result.risk_engine_name,
+            "version": result.risk_engine_version,
+            "config_hash": result.risk_config_hash,
+            "approved": result.risk_summary.approved_orders,
+            "reduced": result.risk_summary.reduced_orders,
+            "rejected": result.risk_summary.rejected_orders,
+            "state_transitions": len(result.risk_state_transitions),
+            "max_portfolio_exposure": result.risk_summary.max_portfolio_exposure,
+            "max_drawdown": result.risk_summary.max_observed_drawdown,
+            "max_daily_loss": result.risk_summary.max_daily_loss,
+        },
         "strategy_parameters": dict(result.strategy_parameters),
         "export_path": str(export_directory),
         "warnings": list(result.warnings),
@@ -526,6 +625,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_backtest(args)
         if args.command == "strategy":
             return _run_strategy(args)
+        if args.command == "risk":
+            return _run_risk(args)
     except (BacktestError, DataError, TradingAIError, ValueError) as exc:
         if getattr(args, "as_json", False):
             print(json.dumps({"status": "ERROR", "error": str(exc)}))
