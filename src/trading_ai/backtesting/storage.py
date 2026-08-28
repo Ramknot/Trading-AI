@@ -13,7 +13,7 @@ from trading_ai.backtesting.reproducibility import to_primitive
 from trading_ai.core.models import BacktestResult
 
 
-RESULT_SCHEMA_VERSION = "1.4"
+RESULT_SCHEMA_VERSION = "1.5"
 _SAFE_RUN_ID = re.compile(r"^[A-Za-z0-9_-]+$")
 _EXPORTED_FILES = frozenset(
     {
@@ -31,9 +31,19 @@ _EXPORTED_FILES = frozenset(
         "activation_decisions.parquet",
         "ml_predictions.parquet",
         "ml_decisions.parquet",
+        "portfolio_opportunities.parquet",
+        "portfolio_decisions.parquet",
+        "portfolio_targets.parquet",
+        "portfolio_sleeves.parquet",
     }
 )
-_LOT5_EXPORTED_FILES = _EXPORTED_FILES - {
+_LOT6_EXPORTED_FILES = _EXPORTED_FILES - {
+    "portfolio_opportunities.parquet",
+    "portfolio_decisions.parquet",
+    "portfolio_targets.parquet",
+    "portfolio_sleeves.parquet",
+}
+_LOT5_EXPORTED_FILES = _LOT6_EXPORTED_FILES - {
     "ml_predictions.parquet",
     "ml_decisions.parquet",
 }
@@ -179,6 +189,9 @@ class BacktestResultStore:
                 ("signal_id", pa.string()),
                 ("ml_decision_id", pa.string()),
                 ("activation_decision_id", pa.string()),
+                ("portfolio_plan_id", pa.string()),
+                ("portfolio_decision_id", pa.string()),
+                ("portfolio_opportunity_ids", pa.list_(pa.string())),
                 ("risk_decision_id", pa.string()),
             ]
         )
@@ -331,6 +344,103 @@ class BacktestResultStore:
         )
 
     @staticmethod
+    def _portfolio_opportunity_schema():
+        import pyarrow as pa
+
+        return pa.schema(
+            [
+                ("opportunity_id", pa.string()),
+                ("timestamp", pa.string()),
+                ("symbol", pa.string()),
+                ("strategy_name", pa.string()),
+                ("strategy_version", pa.string()),
+                ("signal_id", pa.string()),
+                ("action", pa.string()),
+                ("signal_strength", pa.float64()),
+                ("ml_mode", pa.string()),
+                ("ml_prediction_id", pa.string()),
+                ("ml_decision_id", pa.string()),
+                ("activation_decision_id", pa.string()),
+                ("activation_multiplier", pa.string()),
+                ("regime_snapshot_id", pa.string()),
+                ("current_sleeve_weight", pa.string()),
+                ("reason", pa.string()),
+                ("rank_percentile", pa.float64()),
+                ("timeframe", pa.string()),
+            ]
+        )
+
+    @staticmethod
+    def _portfolio_decision_schema():
+        import pyarrow as pa
+
+        return pa.schema(
+            [
+                ("decision_id", pa.string()),
+                ("timestamp", pa.string()),
+                ("opportunity_id", pa.string()),
+                ("status", pa.string()),
+                ("target_weight_before", pa.string()),
+                ("target_weight_after", pa.string()),
+                ("sleeve_weight_before", pa.string()),
+                ("sleeve_weight_after", pa.string()),
+                ("reason_codes", pa.list_(pa.string())),
+                ("human_reasons", pa.list_(pa.string())),
+                ("engine_name", pa.string()),
+                ("engine_version", pa.string()),
+                ("config_hash", pa.string()),
+                ("signal_id", pa.string()),
+            ]
+        )
+
+    @staticmethod
+    def _portfolio_target_schema():
+        import pyarrow as pa
+
+        return pa.schema(
+            [
+                ("symbol", pa.string()),
+                ("target_weight", pa.string()),
+                ("current_weight", pa.string()),
+                ("delta_weight", pa.string()),
+                (
+                    "contributors",
+                    pa.list_(
+                        pa.struct(
+                            [
+                                ("strategy_name", pa.string()),
+                                ("strategy_version", pa.string()),
+                                ("weight", pa.string()),
+                                ("signal_id", pa.string()),
+                            ]
+                        )
+                    ),
+                ),
+                ("currency", pa.string()),
+                ("group", pa.string()),
+                ("portfolio_plan_id", pa.string()),
+                ("timestamp", pa.string()),
+            ]
+        )
+
+    @staticmethod
+    def _portfolio_sleeve_schema():
+        import pyarrow as pa
+
+        return pa.schema(
+            [
+                ("strategy_name", pa.string()),
+                ("strategy_version", pa.string()),
+                ("symbol", pa.string()),
+                ("target_weight_contribution", pa.string()),
+                ("entered_at", pa.string()),
+                ("last_updated_at", pa.string()),
+                ("signal_id", pa.string()),
+                ("activation_multiplier", pa.string()),
+            ]
+        )
+
+    @staticmethod
     def _risk_state_schema():
         import pyarrow as pa
 
@@ -455,6 +565,14 @@ class BacktestResultStore:
                     "validation_period": result.ml_validation_period,
                     "test_period": result.ml_test_period,
                 },
+                "portfolio": {
+                    "engine_name": result.portfolio_engine_name,
+                    "engine_version": result.portfolio_engine_version,
+                    "config": result.portfolio_config,
+                    "config_hash": result.portfolio_config_hash,
+                    "metrics": result.portfolio_metrics,
+                    "plans": result.portfolio_plans,
+                },
                 "counts": {
                     "equity_points": len(result.equity_curve),
                     "orders": len(result.orders),
@@ -469,6 +587,11 @@ class BacktestResultStore:
                     "activation_decisions": len(result.activation_decisions),
                     "ml_predictions": len(result.ml_predictions),
                     "ml_decisions": len(result.ml_decisions),
+                    "portfolio_opportunities": len(result.portfolio_opportunities),
+                    "portfolio_decisions": len(result.portfolio_decisions),
+                    "portfolio_plans": len(result.portfolio_plans),
+                    "portfolio_targets": len(result.portfolio_targets),
+                    "portfolio_sleeves": len(result.portfolio_sleeves),
                 },
             }
         )
@@ -546,6 +669,26 @@ class BacktestResultStore:
                 (to_primitive(decision) for decision in result.ml_decisions),
                 self._ml_decision_schema(),
             )
+            self._write_parquet(
+                directory / "portfolio_opportunities.parquet",
+                (to_primitive(item) for item in result.portfolio_opportunities),
+                self._portfolio_opportunity_schema(),
+            )
+            self._write_parquet(
+                directory / "portfolio_decisions.parquet",
+                (to_primitive(item) for item in result.portfolio_decisions),
+                self._portfolio_decision_schema(),
+            )
+            self._write_parquet(
+                directory / "portfolio_targets.parquet",
+                (to_primitive(item) for item in result.portfolio_targets),
+                self._portfolio_target_schema(),
+            )
+            self._write_parquet(
+                directory / "portfolio_sleeves.parquet",
+                (to_primitive(item) for item in result.portfolio_sleeves),
+                self._portfolio_sleeve_schema(),
+            )
             checksums = {
                 name: _sha256_file(directory / name)
                 for name in sorted(_EXPORTED_FILES)
@@ -575,6 +718,7 @@ class BacktestResultStore:
             exported_files = frozenset(payload["files"])
             if exported_files not in {
                 _EXPORTED_FILES,
+                _LOT6_EXPORTED_FILES,
                 _LOT5_EXPORTED_FILES,
                 _LOT4_EXPORTED_FILES,
                 _LOT3_EXPORTED_FILES,
@@ -604,6 +748,7 @@ class BacktestResultStore:
                 "1.1": _LOT3_EXPORTED_FILES,
                 "1.2": _LOT4_EXPORTED_FILES,
                 "1.3": _LOT5_EXPORTED_FILES,
+                "1.4": _LOT6_EXPORTED_FILES,
                 RESULT_SCHEMA_VERSION: _EXPORTED_FILES,
             }.get(summary.get("schema_version"))
             if expected_files is None or exported_files != expected_files:
@@ -631,4 +776,8 @@ class BacktestResultStore:
             payload["regime"] = {"status": "unavailable"}
         if "ml" not in payload:
             payload["ml"] = {"status": "unavailable / not used"}
+        if "portfolio" not in payload:
+            payload["portfolio"] = {
+                "status": "unavailable / legacy sizing"
+            }
         return payload

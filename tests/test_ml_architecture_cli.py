@@ -192,7 +192,7 @@ def test_cli_exposes_offline_ml_lifecycle_and_backtest_modes(tmp_path, capsys) -
         ]
     )
     assert backtest.ml_mode == "filter"
-    assert backtest.ml_model_id == "ml-explicit"
+    assert backtest.ml_model_id == ["ml-explicit"]
 
     assert main(
         ["ml", "model", "list", "--data-root", str(tmp_path), "--json"]

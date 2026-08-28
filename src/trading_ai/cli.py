@@ -60,6 +60,13 @@ from trading_ai.ml import (
     TrainingPipeline,
 )
 from trading_ai.ml.exceptions import MLError
+from trading_ai.portfolio import (
+    BalancedPortfolioEngine,
+    inspect_portfolio_config,
+    load_asset_currencies,
+    load_balanced_portfolio_config,
+    portfolio_config_hash,
+)
 from trading_ai.regimes import (
     BalancedRegimeDetector,
     BalancedStrategyActivationPolicy,
@@ -203,8 +210,11 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--strategy",
         choices=("buy-and-hold", *BASELINE_STRATEGIES.names),
-        default="buy-and-hold",
-        help="buy-and-hold demo, trend, momentum, breakout, or mean-reversion",
+        action="append",
+        help=(
+            "repeat for one shared multi-strategy portfolio; defaults to the "
+            "buy-and-hold technical demo"
+        ),
     )
     run_parser.add_argument(
         "--symbol",
@@ -272,7 +282,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument(
         "--ml-model-id",
-        help="explicit local registry model ID; no latest-model fallback exists",
+        action="append",
+        help=(
+            "explicit model ID; for multiple strategies use strategy=model-id "
+            "once per strategy (no latest-model fallback)"
+        ),
     )
     run_parser.add_argument(
         "--ml-threshold",
@@ -417,6 +431,20 @@ def build_parser() -> argparse.ArgumentParser:
     model_rollback.add_argument("--timeframe", required=True, choices=("1h", "4h", "1d"))
     model_rollback.add_argument("--reason", required=True)
     _add_store_arguments(model_rollback)
+
+    portfolio_parser = commands.add_parser(
+        "portfolio", help="inspect offline Balanced portfolio construction"
+    )
+    portfolio_commands = portfolio_parser.add_subparsers(
+        dest="portfolio_command", required=True
+    )
+    portfolio_inspect = portfolio_commands.add_parser(
+        "inspect", help="validate fixed sleeves, caps, turnover, and currency policy"
+    )
+    portfolio_inspect.add_argument(
+        "--profile", default=os.getenv("TRADING_AI_PROFILE", "balanced")
+    )
+    portfolio_inspect.add_argument("--json", action="store_true", dest="as_json")
     return parser
 
 
@@ -671,6 +699,58 @@ def _run_risk(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_portfolio(args: argparse.Namespace) -> int:
+    if args.portfolio_command != "inspect":
+        raise AssertionError(f"unhandled portfolio command: {args.portfolio_command}")
+    profile = inspect_profile(args.profile)
+    config = inspect_portfolio_config(profile.name)
+    currencies = load_asset_currencies()
+    locked = profile.name.value == "aggressive" or not profile.enabled or not config.enabled
+    if not locked:
+        risk, _ = load_balanced_risk_config(profile)
+        config, currencies = load_balanced_portfolio_config(profile, risk)
+    payload = {
+        "engine": config.engine_name,
+        "version": config.engine_version,
+        "enabled": config.enabled,
+        "profile": profile.name.value,
+        "profile_enabled": profile.enabled,
+        "locked": locked,
+        "config_hash": portfolio_config_hash(config, currencies),
+        "base_currency": config.base_currency,
+        "limits": {
+            "max_target_exposure": str(config.max_target_exposure),
+            "max_target_per_symbol": str(config.max_target_per_symbol),
+            "max_unique_positions": config.max_unique_positions,
+            "min_cash_fraction": str(config.min_cash_fraction),
+        },
+        "construction": {
+            "allocation": "equal-weight-within-fixed-strategy-sleeve",
+            "min_rebalance_weight": str(config.min_rebalance_weight),
+            "max_entry_turnover_per_cycle": str(
+                config.max_entry_turnover_per_cycle
+            ),
+            "soft_correlation_threshold": str(config.soft_correlation_threshold),
+            "correlation_min_observations": config.correlation_min_observations,
+            "unknown_correlation_policy": config.unknown_correlation_policy.value,
+            "mixed_currency_policy": config.mixed_currency_policy.value,
+        },
+        "sleeves": {
+            item.strategy_name: str(item.budget_weight)
+            for item in config.strategy_sleeves
+        },
+        "unused_budget_policy": "CASH",
+        "risk_authority": "BalancedRiskEngine",
+        "network_access": False,
+        "warning": (
+            "Portfolio construction can diversify exposure but cannot eliminate "
+            "market risk or guarantee profitability."
+        ),
+    }
+    print(_render_payload(payload, args.as_json))
+    return 0
+
+
 def _regime_snapshot_payload(snapshot) -> dict[str, Any]:
     return {
         "snapshot_id": snapshot.snapshot_id,
@@ -918,6 +998,11 @@ def _run_backtest(args: argparse.Namespace) -> int:
     if args.backtest_command != "run":
         raise AssertionError(f"unhandled backtest command: {args.backtest_command}")
     settings = load_runtime_settings(args.environment, args.profile)
+    strategy_names = tuple(args.strategy or ("buy-and-hold",))
+    if len(strategy_names) != len(set(strategy_names)):
+        raise ValueError("each --strategy may be supplied at most once")
+    if "buy-and-hold" in strategy_names and len(strategy_names) != 1:
+        raise ValueError("buy-and-hold cannot be combined with portfolio baselines")
     symbols = tuple(dict.fromkeys(args.symbol))
     if any(symbol not in settings.profile.asset_universe for symbol in symbols):
         invalid = sorted(set(symbols) - set(settings.profile.asset_universe))
@@ -925,7 +1010,7 @@ def _run_backtest(args: argparse.Namespace) -> int:
             "symbols must come from the active profile configuration: "
             + ", ".join(invalid)
         )
-    if args.strategy == "buy-and-hold" and len(symbols) != 1:
+    if strategy_names == ("buy-and-hold",) and len(symbols) != 1:
         raise ValueError("buy-and-hold accepts exactly one --symbol")
     benchmark_symbol = args.benchmark_symbol or symbols[0]
     if benchmark_symbol not in settings.profile.asset_universe:
@@ -945,43 +1030,82 @@ def _run_backtest(args: argparse.Namespace) -> int:
     regime_detector = None
     activation_policy = None
     ml_scorer = None
+    ml_scorers = None
+    portfolio_engine = None
     shared_feature_engine = FeatureEngine()
-    if args.strategy == "buy-and-hold":
+    if strategy_names == ("buy-and-hold",):
         strategy = BuyAndHoldDemoStrategy(symbols[0], args.quantity)
     else:
-        config_builder = _CLI_CONFIG_BUILDERS[args.strategy]
-        strategy = BASELINE_STRATEGIES.create(
-            args.strategy,
-            symbols=symbols,
-            timeframe=args.timeframe,
-            config=config_builder(args),
+        strategies = tuple(
+            BASELINE_STRATEGIES.create(
+                name,
+                symbols=symbols,
+                timeframe=args.timeframe,
+                config=_CLI_CONFIG_BUILDERS[name](args),
+            )
+            for name in strategy_names
         )
+        strategy = strategies[0] if len(strategies) == 1 else strategies
         regime_detector = BalancedRegimeDetector.from_profile(settings.profile)
         activation_policy = BalancedStrategyActivationPolicy.from_profile(
             settings.profile
         )
+        if len(strategies) > 1:
+            portfolio_engine = BalancedPortfolioEngine.from_profile(settings.profile)
     ml_mode = MLMode(args.ml_mode.upper().replace("-", "_"))
+    model_arguments = tuple(args.ml_model_id or ())
     if ml_mode is MLMode.DISABLED:
-        if args.ml_model_id is not None:
+        if model_arguments:
             raise ValueError("--ml-model-id requires score-only or filter mode")
     else:
-        if args.strategy == "buy-and-hold":
+        if strategy_names == ("buy-and-hold",):
             raise ValueError("ML scoring applies to quantitative baseline signals only")
-        if args.ml_model_id is None:
+        if not model_arguments:
             raise ValueError("active ML mode requires explicit --ml-model-id")
-        artifact, adapter, _ = LocalModelRegistry(
-            args.data_root / "ml"
-        ).load(
-            args.ml_model_id,
-            strategy_name=strategy.name,
-            strategy_version=strategy.version,
-            timeframe=args.timeframe,
-        )
-        ml_scorer = SignalMLScorer(
-            mode=ml_mode,
-            inference_engine=InferenceEngine(artifact, adapter),
-            threshold=args.ml_threshold,
-        )
+        registry = LocalModelRegistry(args.data_root / "ml")
+        if len(strategy_names) == 1:
+            if len(model_arguments) != 1:
+                raise ValueError("single-strategy ML requires exactly one model ID")
+            model_id = model_arguments[0].split("=", 1)[-1]
+            assert not isinstance(strategy, tuple)
+            artifact, adapter, _ = registry.load(
+                model_id,
+                strategy_name=strategy.name,
+                strategy_version=strategy.version,
+                timeframe=args.timeframe,
+            )
+            ml_scorer = SignalMLScorer(
+                mode=ml_mode,
+                inference_engine=InferenceEngine(artifact, adapter),
+                threshold=args.ml_threshold,
+            )
+        else:
+            assignments: dict[str, str] = {}
+            for raw in model_arguments:
+                if "=" not in raw:
+                    raise ValueError(
+                        "multi-strategy ML model IDs must use strategy=model-id"
+                    )
+                name, model_id = raw.split("=", 1)
+                if name not in strategy_names or name in assignments or not model_id:
+                    raise ValueError("invalid or duplicate strategy=model-id assignment")
+                assignments[name] = model_id
+            if set(assignments) != set(strategy_names):
+                raise ValueError("multi-strategy ML requires one model ID per strategy")
+            assert isinstance(strategy, tuple)
+            ml_scorers = {}
+            for item in strategy:
+                artifact, adapter, _ = registry.load(
+                    assignments[item.name],
+                    strategy_name=item.name,
+                    strategy_version=item.version,
+                    timeframe=args.timeframe,
+                )
+                ml_scorers[item.name] = SignalMLScorer(
+                    mode=ml_mode,
+                    inference_engine=InferenceEngine(artifact, adapter),
+                    threshold=args.ml_threshold,
+                )
     config = BacktestConfig(
         starting_cash=args.starting_cash,
         spread_bps=args.spread_bps,
@@ -1007,6 +1131,8 @@ def _run_backtest(args: argparse.Namespace) -> int:
         regime_detector=regime_detector,
         activation_policy=activation_policy,
         ml_scorer=ml_scorer,
+        ml_scorers=ml_scorers,
+        portfolio_engine=portfolio_engine,
     ).run(
         strategy,
         datasets,
@@ -1091,6 +1217,27 @@ def _run_backtest(args: argparse.Namespace) -> int:
                 for decision in result.ml_decisions
             ),
         },
+        "portfolio": (
+            {
+                "engine": result.portfolio_engine_name,
+                "version": result.portfolio_engine_version,
+                "config_hash": result.portfolio_config_hash,
+                "opportunities": len(result.portfolio_opportunities),
+                "selected": result.portfolio_metrics.opportunities_selected,
+                "deferred": result.portfolio_metrics.opportunities_deferred,
+                "rejected": result.portfolio_metrics.opportunities_rejected,
+                "plans": len(result.portfolio_plans),
+                "targets": len(result.portfolio_targets),
+                "max_exposure": result.portfolio_metrics.max_gross_exposure,
+                "planned_turnover": result.portfolio_metrics.planned_turnover,
+                "executed_turnover": result.portfolio_metrics.executed_turnover,
+                "sleeves": dict(
+                    result.portfolio_metrics.targets_by_strategy_sleeve
+                ),
+            }
+            if result.portfolio_metrics is not None
+            else {"status": "unavailable / legacy sizing"}
+        ),
         "strategy_parameters": dict(result.strategy_parameters),
         "export_path": str(export_directory),
         "warnings": list(result.warnings),
@@ -1118,6 +1265,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_regime(args)
         if args.command == "ml":
             return _run_ml(args)
+        if args.command == "portfolio":
+            return _run_portfolio(args)
     except (BacktestError, DataError, RegimeError, MLError, TradingAIError, ValueError) as exc:
         if getattr(args, "as_json", False):
             print(json.dumps({"status": "ERROR", "error": str(exc)}))

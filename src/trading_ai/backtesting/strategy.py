@@ -11,6 +11,7 @@ from trading_ai.core.models import OrderSide, OrderType
 
 if TYPE_CHECKING:
     from trading_ai.ml.decisions import MLFilterDecision
+    from trading_ai.portfolio.models import PortfolioDecision
     from trading_ai.regimes.models import ActivationDecision
 
 
@@ -48,6 +49,11 @@ class BacktestStrategy(ABC):
 
     def on_ml_decision(self, decision: MLFilterDecision) -> None:
         """Observe filtering only to maintain deterministic proposal state."""
+
+        del decision
+
+    def on_portfolio_decision(self, decision: PortfolioDecision) -> None:
+        """Observe allocation outcome only to maintain proposal state."""
 
         del decision
 

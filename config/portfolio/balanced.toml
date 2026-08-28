@@ -1,0 +1,23 @@
+name = "balanced"
+enabled = true
+engine_name = "balanced-portfolio"
+engine_version = "1.0"
+
+base_currency = "USD"
+max_target_exposure = 0.60
+max_target_per_symbol = 0.15
+max_unique_positions = 5
+min_cash_fraction = 0.40
+min_rebalance_weight = 0.01
+max_entry_turnover_per_cycle = 0.20
+soft_correlation_threshold = 0.75
+correlation_min_observations = 20
+unknown_correlation_policy = "DEPRIORITIZE"
+mixed_currency_policy = "REJECT_WITHOUT_FX"
+quantity_step = "0.000001"
+
+[strategy_sleeves]
+trend = 0.15
+momentum = 0.15
+breakout = 0.15
+mean-reversion = 0.15

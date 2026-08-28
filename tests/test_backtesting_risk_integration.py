@@ -374,7 +374,7 @@ def test_risk_export_is_hashed_and_tamper_evident(tmp_path, paper_context) -> No
     assert parquet.read_table(directory / "risk_decisions.parquet").num_rows == 1
     assert (directory / "risk_states.parquet").is_file()
     summary = json.loads((directory / "summary.json").read_text(encoding="utf-8"))
-    assert summary["schema_version"] == "1.4"
+    assert summary["schema_version"] == "1.5"
     assert summary["risk"]["config_hash"] == result.risk_config_hash
     assert store.verify_integrity(result.run_id) is True
 

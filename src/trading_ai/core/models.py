@@ -30,6 +30,14 @@ if TYPE_CHECKING:
         RegimeSnapshot,
         RegimeTransition,
     )
+    from trading_ai.portfolio.models import (
+        PortfolioDecision,
+        PortfolioMetrics,
+        PortfolioOpportunity,
+        PortfolioTarget,
+        RebalancePlan,
+        StrategySleeveState,
+    )
 
 
 class ExecutionEnvironment(str, Enum):
@@ -176,6 +184,9 @@ class OrderRequest:
     strategy_decision_id: str | None = None
     ml_decision_id: str | None = None
     activation_decision_id: str | None = None
+    portfolio_plan_id: str | None = None
+    portfolio_decision_id: str | None = None
+    portfolio_opportunity_ids: tuple[str, ...] = ()
     created_at: datetime | None = None
     expected_entry_price: Decimal | None = None
     invalidation_price: Decimal | None = None
@@ -202,6 +213,14 @@ class OrderRequest:
             _require_non_empty(self.activation_decision_id, "activation_decision_id")
         if self.ml_decision_id is not None:
             _require_non_empty(self.ml_decision_id, "ml_decision_id")
+        for field_name in ("portfolio_plan_id", "portfolio_decision_id"):
+            value = getattr(self, field_name)
+            if value is not None:
+                _require_non_empty(value, field_name)
+        if tuple(sorted(set(self.portfolio_opportunity_ids))) != self.portfolio_opportunity_ids:
+            raise ValueError("portfolio_opportunity_ids must be sorted and unique")
+        if (self.portfolio_plan_id is None) != (self.portfolio_decision_id is None):
+            raise ValueError("portfolio plan and decision lineage must be recorded together")
         for field_name in (
             "expected_entry_price",
             "invalidation_price",
@@ -493,6 +512,16 @@ class BacktestResult:
     ml_test_period: TimeRange | None = None
     ml_predictions: tuple[MLPrediction, ...] = ()
     ml_decisions: tuple[MLFilterDecision, ...] = ()
+    portfolio_engine_name: str = "unavailable"
+    portfolio_engine_version: str = "0"
+    portfolio_config: tuple[tuple[str, str], ...] = ()
+    portfolio_config_hash: str = "0" * 64
+    portfolio_opportunities: tuple[PortfolioOpportunity, ...] = ()
+    portfolio_decisions: tuple[PortfolioDecision, ...] = ()
+    portfolio_plans: tuple[RebalancePlan, ...] = ()
+    portfolio_targets: tuple[PortfolioTarget, ...] = ()
+    portfolio_sleeves: tuple[StrategySleeveState, ...] = ()
+    portfolio_metrics: PortfolioMetrics | None = None
 
     def __post_init__(self) -> None:
         _require_non_empty(self.run_id, "run_id")
@@ -689,6 +718,55 @@ class BacktestResult:
                 raise ValueError("active ML result requires ordered feature names")
             if any(order.ml_decision_id is None for order in self.orders):
                 raise ValueError("every active-ML order requires an ML decision")
+        _require_non_empty(self.portfolio_engine_name, "portfolio_engine_name")
+        _require_non_empty(self.portfolio_engine_version, "portfolio_engine_version")
+        if tuple(sorted(self.portfolio_config)) != self.portfolio_config:
+            raise ValueError("portfolio_config must be deterministically sorted")
+        if len(self.portfolio_config_hash) != 64 or any(
+            character not in "0123456789abcdef"
+            for character in self.portfolio_config_hash.lower()
+        ):
+            raise ValueError("portfolio_config_hash must be a SHA-256 digest")
+        opportunity_ids = [item.opportunity_id for item in self.portfolio_opportunities]
+        if len(opportunity_ids) != len(set(opportunity_ids)):
+            raise ValueError("portfolio opportunity IDs must be unique")
+        portfolio_decision_ids = [item.decision_id for item in self.portfolio_decisions]
+        if len(portfolio_decision_ids) != len(set(portfolio_decision_ids)):
+            raise ValueError("portfolio decision IDs must be unique")
+        known_opportunities = set(opportunity_ids)
+        if any(
+            item.opportunity_id not in known_opportunities
+            for item in self.portfolio_decisions
+        ):
+            raise ValueError("portfolio decisions must reference exported opportunities")
+        plan_ids = [item.plan_id for item in self.portfolio_plans]
+        if len(plan_ids) != len(set(plan_ids)):
+            raise ValueError("portfolio plan IDs must be unique")
+        known_plans = set(plan_ids)
+        known_portfolio_decisions = set(portfolio_decision_ids)
+        if self.portfolio_plans and any(
+            order.portfolio_plan_id is None or order.portfolio_decision_id is None
+            for order in self.orders
+        ):
+            raise ValueError("portfolio-run orders require plan and decision lineage")
+        if any(
+            order.portfolio_plan_id is not None
+            and order.portfolio_plan_id not in known_plans
+            for order in self.orders
+        ):
+            raise ValueError("orders must reference exported portfolio plans")
+        if any(
+            order.portfolio_decision_id is not None
+            and order.portfolio_decision_id not in known_portfolio_decisions
+            for order in self.orders
+        ):
+            raise ValueError("orders must reference exported portfolio decisions")
+        if any(
+            opportunity_id not in known_opportunities
+            for order in self.orders
+            for opportunity_id in order.portfolio_opportunity_ids
+        ):
+            raise ValueError("orders must reference exported portfolio opportunities")
 
     @property
     def finished_at(self) -> datetime:

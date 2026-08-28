@@ -276,6 +276,11 @@ class OrderIntent:
     expected_entry_price: Decimal | None = None
     invalidation_price: Decimal | None = None
     risk_distance: Decimal | None = None
+    portfolio_plan_id: str | None = None
+    portfolio_decision_id: str | None = None
+    portfolio_opportunity_ids: tuple[str, ...] = ()
+    ml_decision_id: str | None = None
+    activation_decision_id: str | None = None
 
     def __post_init__(self) -> None:
         _require_text(self.symbol, "symbol")
@@ -304,6 +309,19 @@ class OrderIntent:
                 raise ValueError(f"{field_name} must be positive and finite")
         if self.invalidation_price is not None and self.risk_distance is not None:
             raise ValueError("provide invalidation_price or risk_distance, not both")
+        for field_name in (
+            "portfolio_plan_id",
+            "portfolio_decision_id",
+            "ml_decision_id",
+            "activation_decision_id",
+        ):
+            value = getattr(self, field_name)
+            if value is not None:
+                _require_text(value, field_name)
+        if tuple(sorted(set(self.portfolio_opportunity_ids))) != self.portfolio_opportunity_ids:
+            raise ValueError("portfolio_opportunity_ids must be sorted and unique")
+        if (self.portfolio_plan_id is None) != (self.portfolio_decision_id is None):
+            raise ValueError("portfolio plan and decision lineage must be recorded together")
 
 
 @dataclass(frozen=True, slots=True)
@@ -356,6 +374,9 @@ class BacktestOrder:
     signal_id: str | None = None
     ml_decision_id: str | None = None
     activation_decision_id: str | None = None
+    portfolio_plan_id: str | None = None
+    portfolio_decision_id: str | None = None
+    portfolio_opportunity_ids: tuple[str, ...] = ()
     risk_decision_id: str | None = None
     status: OrderStatus = OrderStatus.PENDING
     limit_price: Decimal | None = None
@@ -374,6 +395,14 @@ class BacktestOrder:
             _require_text(self.ml_decision_id, "ml_decision_id")
         if self.activation_decision_id is not None:
             _require_text(self.activation_decision_id, "activation_decision_id")
+        for field_name in ("portfolio_plan_id", "portfolio_decision_id"):
+            value = getattr(self, field_name)
+            if value is not None:
+                _require_text(value, field_name)
+        if tuple(sorted(set(self.portfolio_opportunity_ids))) != self.portfolio_opportunity_ids:
+            raise ValueError("portfolio_opportunity_ids must be sorted and unique")
+        if (self.portfolio_plan_id is None) != (self.portfolio_decision_id is None):
+            raise ValueError("portfolio plan and decision lineage must be recorded together")
         if self.risk_decision_id is not None:
             _require_text(self.risk_decision_id, "risk_decision_id")
         if self.completed_at is not None:

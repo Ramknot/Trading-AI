@@ -10,7 +10,7 @@
 - Lot 4 — Balanced Risk Engine: DONE
 - Lot 5 — Regime Detector + Mean Reversion + Strategy Activation: DONE
 - Lot 6 — ML Platform Foundation & Statistical Scoring: DONE
-- Lot 7 — Portfolio Engine: TODO
+- Lot 7 — Multi-Strategy Portfolio Engine: DONE
 - Lot 8 — Dashboard: TODO
 - Lot 9 — Broker / Paper Trading: TODO
 
@@ -49,3 +49,7 @@ Delivered: Feature Engine schema 1.1 with Efficiency Ratio, historical volatilit
 ## Lot 6 delivery summary
 
 Delivered: framework-neutral `ModelAdapter`, `ModelTrainer`, `ModelRegistry`, and inference contracts with TABULAR operational and future input kinds reserved; ML feature schema 1.0 built only from shared point-in-time features/regimes; explicit next-bar-open/horizon-close labels; purged and embargoed chronological TRAIN/VALIDATION/FINAL TEST with expanding walk-forward validation; fixed Logistic Regression, Random Forest, and Gradient Boosting adapters; deterministic training and classification reports; checksum-verified local model registry with audited CANDIDATE/VALIDATED/APPROVED/RETIRED promotion and rollback; DISABLED/SCORE_ONLY/FILTER modes with exits always permitted and approved-model fail-closed filtering; ML/policy/risk sovereignty and lineage; schema 1.4 exports and backward inspection through schema 1.3; offline ML CLI, integration, leakage, reproducibility, and architecture tests. No broker, neural network, streaming, or online-learning path was added. Future ML Evolution and Aggressive Research remain LOCKED.
+
+## Lot 7 delivery summary
+
+Delivered: `BalancedPortfolioEngine` 1.0 with profile/Risk-bounded TOML configuration and SHA-256 provenance; fixed 15% Trend, Momentum, Breakout, and Mean Reversion sleeves; complete UTC opportunity batching, deterministic intra-strategy ranking, soft exact-timestamp correlation/group diversification, same-symbol aggregation, sleeve attribution, target netting, five-position/15%-symbol/60%-exposure construction caps, no-trade band, entry-turnover deferral, pending-order conflict handling, and current-close sizing; fail-closed point-in-time currency contracts with configuration-driven asset metadata; shared multi-strategy Backtester integration across ML modes, activation policy, mandatory Balanced Risk, and next-bar execution; full signal-to-fill portfolio lineage, schema 1.5 tamper-evident exports, backward inspection through schema 1.4, Portfolio CLI diagnostics, neutral mono-versus-multi research reporting, deterministic smoke runs, and offline architecture/safety tests. No broker, optimizer, neural network, streaming, online learning, leverage, or Aggressive path was added. Future ML Evolution remains PLANNED / LOCKED and Aggressive Research remains LOCKED.

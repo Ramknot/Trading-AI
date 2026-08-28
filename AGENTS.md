@@ -79,4 +79,17 @@ These rules apply to Codex and every future development agent working in this re
 - No silent model fallback is permitted; artifact or schema failures must fail closed for new entries.
 - ML architecture must depend on `ModelAdapter` contracts rather than directly on scikit-learn classes.
 - Sequence, Transformer, multimodal, real-time, and online-learning capabilities remain PLANNED/LOCKED until Balanced validation.
+- The Portfolio Engine proposes allocations; `BalancedRiskEngine` remains the final authority on every quantity and order.
+- Portfolio configuration must never exceed trading-profile or Risk hard limits.
+- Unused strategy-sleeve budget remains cash and must not be reassigned to another sleeve automatically.
+- Portfolio allocation must never depend on recent strategy profitability or select historical winners.
+- ML probabilities must not increase Portfolio allocations in Lot 7.
+- Existing positions must not be rotated solely because another opportunity ranks higher.
+- Risk-reducing exits must not be blocked by Portfolio turnover or diversification preferences.
+- Portfolio decisions sharing one timestamp must be batch-order invariant.
+- Portfolio sizing must use only prices known at decision time, never future bars or next-open prices.
+- Never assume an implicit 1:1 FX rate or map an unknown asset currency to the base currency.
+- Portfolio modules must not contact brokers, concrete data providers, or network clients.
+- Portfolio construction must not hide Markowitz, Kelly, risk-parity, performance-chasing, or ML allocation optimization.
+- A `PortfolioPlan` is a proposal, not execution permission, and must never bypass Risk.
 - Update `PROJECT_STATE.md` when a lot changes state.

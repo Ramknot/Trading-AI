@@ -29,6 +29,7 @@ from trading_ai.strategies.config import (
 from trading_ai.strategies.sizing import BaselineSizer
 from trading_ai.regimes.models import StructureRegime
 from trading_ai.regimes.models import ActivationDecision, ActivationStatus
+from trading_ai.portfolio.models import PortfolioDecision, PortfolioDecisionStatus
 
 
 def _symbols(values: Sequence[str]) -> tuple[str, ...]:
@@ -115,6 +116,21 @@ class _FeatureBaseline(BacktestStrategy):
             None,
         )
         if signal is not None and signal.action is StrategySignalAction.ENTER_LONG:
+            self._entry_submitted.discard(signal.symbol)
+
+    def on_portfolio_decision(self, decision: PortfolioDecision) -> None:
+        """Release proposals the Portfolio Engine did not select this cycle."""
+
+        if decision.status not in {
+            PortfolioDecisionStatus.DEFER,
+            PortfolioDecisionStatus.REJECT,
+        }:
+            return
+        signal = next(
+            (item for item in self._signals if item.signal_id == decision.signal_id),
+            None,
+        )
+        if signal is not None:
             self._entry_submitted.discard(signal.symbol)
 
     def _emit_signal(

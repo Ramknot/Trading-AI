@@ -19,6 +19,21 @@ from trading_ai.data.models import CacheMode
 from trading_ai.data.storage import ParquetDataStore
 
 
+PORTFOLIO_FILES = (
+    "portfolio_opportunities.parquet",
+    "portfolio_decisions.parquet",
+    "portfolio_targets.parquet",
+    "portfolio_sleeves.parquet",
+)
+PORTFOLIO_COUNTS = (
+    "portfolio_opportunities",
+    "portfolio_decisions",
+    "portfolio_plans",
+    "portfolio_targets",
+    "portfolio_sleeves",
+)
+
+
 def _result(paper_context):
     return BacktestEngine(code_version="test-code").run(
         BuyAndHoldDemoStrategy("AAPL", Decimal("1")),
@@ -56,7 +71,8 @@ def test_result_export_writes_json_parquet_and_verifiable_hashes(
     assert parquet.read_table(directory / "activation_decisions.parquet").num_rows == 0
     assert parquet.read_table(directory / "ml_predictions.parquet").num_rows == 0
     assert parquet.read_table(directory / "ml_decisions.parquet").num_rows == 0
-    assert summary["schema_version"] == "1.4"
+    assert all(parquet.read_table(directory / name).num_rows == 0 for name in PORTFOLIO_FILES)
+    assert summary["schema_version"] == "1.5"
     assert summary["risk"]["engine_name"] == "permissive-test-risk"
 
 
@@ -88,6 +104,7 @@ def test_result_store_keeps_lot2_schema_1_0_exports_inspectable(
         "activation_decisions.parquet",
         "ml_predictions.parquet",
         "ml_decisions.parquet",
+        *PORTFOLIO_FILES,
     ):
         (directory / name).unlink()
     summary_path = directory / "summary.json"
@@ -101,9 +118,12 @@ def test_result_store_keeps_lot2_schema_1_0_exports_inspectable(
     summary["counts"].pop("activation_decisions")
     summary["counts"].pop("ml_predictions")
     summary["counts"].pop("ml_decisions")
+    for name in PORTFOLIO_COUNTS:
+        summary["counts"].pop(name)
     summary.pop("risk")
     summary.pop("regime")
     summary.pop("ml")
+    summary.pop("portfolio")
     summary_path.write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -118,6 +138,7 @@ def test_result_store_keeps_lot2_schema_1_0_exports_inspectable(
         "activation_decisions.parquet",
         "ml_predictions.parquet",
         "ml_decisions.parquet",
+        *PORTFOLIO_FILES,
     ):
         checksums["files"].pop(name)
     checksums["files"]["summary.json"] = hashlib.sha256(
@@ -133,6 +154,7 @@ def test_result_store_keeps_lot2_schema_1_0_exports_inspectable(
     assert "signals" not in inspected["counts"]
     assert inspected["regime"]["status"] == "unavailable"
     assert inspected["ml"]["status"] == "unavailable / not used"
+    assert inspected["portfolio"]["status"] == "unavailable / legacy sizing"
 
 
 def test_result_store_keeps_lot3_schema_1_1_exports_inspectable(
@@ -149,6 +171,7 @@ def test_result_store_keeps_lot3_schema_1_1_exports_inspectable(
         "activation_decisions.parquet",
         "ml_predictions.parquet",
         "ml_decisions.parquet",
+        *PORTFOLIO_FILES,
     ):
         (directory / name).unlink()
     summary_path = directory / "summary.json"
@@ -161,9 +184,12 @@ def test_result_store_keeps_lot3_schema_1_1_exports_inspectable(
     summary["counts"].pop("activation_decisions")
     summary["counts"].pop("ml_predictions")
     summary["counts"].pop("ml_decisions")
+    for name in PORTFOLIO_COUNTS:
+        summary["counts"].pop(name)
     summary.pop("risk")
     summary.pop("regime")
     summary.pop("ml")
+    summary.pop("portfolio")
     summary_path.write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -177,6 +203,7 @@ def test_result_store_keeps_lot3_schema_1_1_exports_inspectable(
         "activation_decisions.parquet",
         "ml_predictions.parquet",
         "ml_decisions.parquet",
+        *PORTFOLIO_FILES,
     ):
         checksums["files"].pop(name)
     checksums["files"]["summary.json"] = hashlib.sha256(
@@ -192,6 +219,7 @@ def test_result_store_keeps_lot3_schema_1_1_exports_inspectable(
     assert "risk" not in inspected
     assert inspected["regime"]["status"] == "unavailable"
     assert inspected["ml"]["status"] == "unavailable / not used"
+    assert inspected["portfolio"]["status"] == "unavailable / legacy sizing"
 
 
 def test_result_store_keeps_lot4_schema_1_2_exports_inspectable(
@@ -206,6 +234,7 @@ def test_result_store_keeps_lot4_schema_1_2_exports_inspectable(
         "activation_decisions.parquet",
         "ml_predictions.parquet",
         "ml_decisions.parquet",
+        *PORTFOLIO_FILES,
     )
     for name in regime_files:
         (directory / name).unlink()
@@ -217,8 +246,11 @@ def test_result_store_keeps_lot4_schema_1_2_exports_inspectable(
     summary["counts"].pop("activation_decisions")
     summary["counts"].pop("ml_predictions")
     summary["counts"].pop("ml_decisions")
+    for name in PORTFOLIO_COUNTS:
+        summary["counts"].pop(name)
     summary.pop("regime")
     summary.pop("ml")
+    summary.pop("portfolio")
     summary_path.write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -238,6 +270,7 @@ def test_result_store_keeps_lot4_schema_1_2_exports_inspectable(
     assert "risk" in inspected
     assert inspected["regime"]["status"] == "unavailable"
     assert inspected["ml"]["status"] == "unavailable / not used"
+    assert inspected["portfolio"]["status"] == "unavailable / legacy sizing"
 
 
 def test_result_store_keeps_lot5_schema_1_3_exports_inspectable(
@@ -246,7 +279,7 @@ def test_result_store_keeps_lot5_schema_1_3_exports_inspectable(
     result = _result(paper_context)
     store = BacktestResultStore(tmp_path / "backtests")
     directory = store.export(result)
-    ml_files = ("ml_predictions.parquet", "ml_decisions.parquet")
+    ml_files = ("ml_predictions.parquet", "ml_decisions.parquet", *PORTFOLIO_FILES)
     for name in ml_files:
         (directory / name).unlink()
     summary_path = directory / "summary.json"
@@ -254,7 +287,10 @@ def test_result_store_keeps_lot5_schema_1_3_exports_inspectable(
     summary["schema_version"] = "1.3"
     summary["counts"].pop("ml_predictions")
     summary["counts"].pop("ml_decisions")
+    for name in PORTFOLIO_COUNTS:
+        summary["counts"].pop(name)
     summary.pop("ml")
+    summary.pop("portfolio")
     summary_path.write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -273,6 +309,41 @@ def test_result_store_keeps_lot5_schema_1_3_exports_inspectable(
     assert inspected["schema_version"] == "1.3"
     assert "regime" in inspected
     assert inspected["ml"]["status"] == "unavailable / not used"
+    assert inspected["portfolio"]["status"] == "unavailable / legacy sizing"
+
+
+def test_result_store_keeps_lot6_schema_1_4_exports_inspectable(
+    tmp_path, paper_context
+) -> None:
+    result = _result(paper_context)
+    store = BacktestResultStore(tmp_path / "backtests")
+    directory = store.export(result)
+    for name in PORTFOLIO_FILES:
+        (directory / name).unlink()
+    summary_path = directory / "summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["schema_version"] = "1.4"
+    for name in PORTFOLIO_COUNTS:
+        summary["counts"].pop(name)
+    summary.pop("portfolio")
+    summary_path.write_text(
+        json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    checksums_path = directory / "checksums.json"
+    checksums = json.loads(checksums_path.read_text(encoding="utf-8"))
+    for name in PORTFOLIO_FILES:
+        checksums["files"].pop(name)
+    checksums["files"]["summary.json"] = hashlib.sha256(
+        summary_path.read_bytes()
+    ).hexdigest()
+    checksums_path.write_text(
+        json.dumps(checksums, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+    inspected = store.inspect(result.run_id)
+    assert inspected["schema_version"] == "1.4"
+    assert inspected["ml"]["mode"] == "DISABLED"
+    assert inspected["portfolio"]["status"] == "unavailable / legacy sizing"
 
 
 def test_cached_dataset_adapter_preserves_manifest_and_action_provenance(
