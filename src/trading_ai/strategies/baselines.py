@@ -98,6 +98,25 @@ class _FeatureBaseline(BacktestStrategy):
         elif signal.action is StrategySignalAction.EXIT_LONG:
             self._exit_submitted.discard(signal.symbol)
 
+    def on_ml_decision(self, decision: object) -> None:
+        """Release only entry proposals that the ML gate stopped."""
+
+        if getattr(getattr(decision, "status", None), "value", None) not in {
+            "BLOCK",
+            "UNAVAILABLE",
+        }:
+            return
+        signal = next(
+            (
+                item
+                for item in self._signals
+                if item.signal_id == getattr(decision, "signal_id", None)
+            ),
+            None,
+        )
+        if signal is not None and signal.action is StrategySignalAction.ENTER_LONG:
+            self._entry_submitted.discard(signal.symbol)
+
     def _emit_signal(
         self,
         context: StrategyContext,

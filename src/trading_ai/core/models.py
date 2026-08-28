@@ -22,6 +22,8 @@ if TYPE_CHECKING:
         Trade,
     )
     from trading_ai.risk.models import RiskStateTransition, RiskSummary
+    from trading_ai.ml.decisions import MLFilterDecision, MLPrediction
+    from trading_ai.ml.models import TimeRange
     from trading_ai.regimes.models import (
         ActivationDecision,
         RegimeReport,
@@ -172,6 +174,7 @@ class OrderRequest:
     order_type: OrderType = OrderType.MARKET
     limit_price: Decimal | None = None
     strategy_decision_id: str | None = None
+    ml_decision_id: str | None = None
     activation_decision_id: str | None = None
     created_at: datetime | None = None
     expected_entry_price: Decimal | None = None
@@ -197,6 +200,8 @@ class OrderRequest:
             _require_aware(self.created_at, "created_at")
         if self.activation_decision_id is not None:
             _require_non_empty(self.activation_decision_id, "activation_decision_id")
+        if self.ml_decision_id is not None:
+            _require_non_empty(self.ml_decision_id, "ml_decision_id")
         for field_name in (
             "expected_entry_price",
             "invalidation_price",
@@ -470,6 +475,24 @@ class BacktestResult:
     regime_transitions: tuple[RegimeTransition, ...] = ()
     activation_decisions: tuple[ActivationDecision, ...] = ()
     regime_report: RegimeReport | None = None
+    ml_mode: str = "DISABLED"
+    ml_model_id: str | None = None
+    ml_model_family: str | None = None
+    ml_model_version: str | None = None
+    ml_model_status: str | None = None
+    ml_model_artifact_hash: str | None = None
+    ml_base_feature_schema_version: str | None = None
+    ml_feature_schema_version: str | None = None
+    ml_feature_names: tuple[str, ...] = ()
+    ml_label_config: tuple[tuple[str, str], ...] = ()
+    ml_split_config: tuple[tuple[str, str], ...] = ()
+    ml_model_config: tuple[tuple[str, str], ...] = ()
+    ml_threshold: float | None = None
+    ml_training_period: TimeRange | None = None
+    ml_validation_period: TimeRange | None = None
+    ml_test_period: TimeRange | None = None
+    ml_predictions: tuple[MLPrediction, ...] = ()
+    ml_decisions: tuple[MLFilterDecision, ...] = ()
 
     def __post_init__(self) -> None:
         _require_non_empty(self.run_id, "run_id")
@@ -617,6 +640,55 @@ class BacktestResult:
             for order in self.orders
         ):
             raise ValueError("order activation lineage must reference a result decision")
+        if self.ml_mode not in {"DISABLED", "SCORE_ONLY", "FILTER"}:
+            raise ValueError("ml_mode must be DISABLED, SCORE_ONLY, or FILTER")
+        for field_name in ("ml_label_config", "ml_split_config", "ml_model_config"):
+            values = getattr(self, field_name)
+            if tuple(sorted(values)) != values:
+                raise ValueError(f"{field_name} must be deterministically sorted")
+        if self.ml_threshold is not None and not 0.0 <= self.ml_threshold <= 1.0:
+            raise ValueError("ml_threshold must be in [0, 1]")
+        prediction_ids = [item.prediction_id for item in self.ml_predictions]
+        if len(prediction_ids) != len(set(prediction_ids)):
+            raise ValueError("ML prediction IDs must be unique")
+        ml_decision_ids = [item.decision_id for item in self.ml_decisions]
+        if len(ml_decision_ids) != len(set(ml_decision_ids)):
+            raise ValueError("ML decision IDs must be unique")
+        if any(item.signal_id not in known_signals for item in self.ml_decisions):
+            raise ValueError("ML decisions must reference exact strategy signals")
+        known_predictions = set(prediction_ids)
+        if any(
+            item.prediction_id is not None
+            and item.prediction_id not in known_predictions
+            for item in self.ml_decisions
+        ):
+            raise ValueError("ML decisions must reference exported predictions")
+        known_ml_decisions = set(ml_decision_ids)
+        if any(
+            order.ml_decision_id is not None
+            and order.ml_decision_id not in known_ml_decisions
+            for order in self.orders
+        ):
+            raise ValueError("orders must reference exported ML decisions")
+        if self.ml_mode != "DISABLED":
+            for field_name in (
+                "ml_model_id",
+                "ml_model_family",
+                "ml_model_version",
+                "ml_model_status",
+                "ml_base_feature_schema_version",
+                "ml_feature_schema_version",
+            ):
+                value = getattr(self, field_name)
+                if value is None:
+                    raise ValueError(f"active ML result requires {field_name}")
+                _require_non_empty(value, field_name)
+            if self.ml_model_artifact_hash is None or len(self.ml_model_artifact_hash) != 64:
+                raise ValueError("active ML result requires a SHA-256 model artifact hash")
+            if not self.ml_feature_names:
+                raise ValueError("active ML result requires ordered feature names")
+            if any(order.ml_decision_id is None for order in self.orders):
+                raise ValueError("every active-ML order requires an ML decision")
 
     @property
     def finished_at(self) -> datetime:

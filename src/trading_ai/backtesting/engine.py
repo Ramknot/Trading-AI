@@ -29,6 +29,7 @@ from trading_ai.backtesting.models import (
     OrderStatus,
     StrategyContext,
     StrategySignal,
+    StrategySignalAction,
 )
 from trading_ai.backtesting.portfolio import PortfolioLedger
 from trading_ai.backtesting.reproducibility import (
@@ -59,6 +60,9 @@ from trading_ai.data.models import (
     StockSplit,
 )
 from trading_ai.features import FeatureEngine, FeatureRequest
+from trading_ai.ml.base import MLScorer
+from trading_ai.ml.decisions import MLFilterDecision, MLPrediction
+from trading_ai.ml.models import MLFilterStatus, MLMode
 from trading_ai.risk.base import RiskEngine
 from trading_ai.risk.deny_all import DenyAllRiskEngine
 from trading_ai.risk.models import RiskContext
@@ -105,11 +109,20 @@ class BacktestEngine(Backtester):
         feature_engine: FeatureEngine | None = None,
         regime_detector: RegimeDetector | None = None,
         activation_policy: ActivationPolicy | None = None,
+        ml_scorer: MLScorer | None = None,
         code_version: str | None = None,
     ) -> None:
         if (regime_detector is None) != (activation_policy is None):
             raise BacktestConfigurationError(
                 "regime_detector and activation_policy must be injected together"
+            )
+        if (
+            ml_scorer is not None
+            and ml_scorer.mode is not MLMode.DISABLED
+            and regime_detector is None
+        ):
+            raise BacktestConfigurationError(
+                "active ML scoring requires regime detector and activation policy"
             )
         self._execution_model_factory = (
             execution_model_factory or BarExecutionModel
@@ -119,6 +132,7 @@ class BacktestEngine(Backtester):
         self._feature_engine = feature_engine or FeatureEngine()
         self._regime_detector = regime_detector
         self._activation_policy = activation_policy
+        self._ml_scorer = ml_scorer
         self._code_version = code_version
 
     @property
@@ -136,6 +150,21 @@ class BacktestEngine(Backtester):
     ) -> BacktestResult:
         settings = load_runtime_settings(context.environment, context.profile)
         profile = settings.profile
+        if (
+            self._ml_scorer is not None
+            and self._ml_scorer.mode is not MLMode.DISABLED
+        ):
+            artifact = self._ml_scorer.artifact
+            if artifact is None:
+                raise BacktestConfigurationError("active ML mode requires model artifact")
+            if (
+                artifact.strategy_name != strategy.name
+                or artifact.strategy_version != strategy.version
+                or artifact.timeframe != config.primary_timeframe
+            ):
+                raise BacktestConfigurationError(
+                    "ML model strategy/version/timeframe is incompatible with the run"
+                )
         if config.allow_short and not profile.allow_short:
             raise BacktestConfigurationError(
                 "backtest allow_short exceeds the active profile; Balanced is long-only"
@@ -200,6 +229,8 @@ class BacktestEngine(Backtester):
         risk_decisions: list[RiskDecision] = []
         regime_snapshots: list[RegimeSnapshot] = []
         activation_decisions: list[ActivationDecision] = []
+        ml_predictions: list[MLPrediction] = []
+        ml_decisions: list[MLFilterDecision] = []
         pending_buy_risk: dict[str, tuple[str, Decimal, Decimal]] = {}
         pending_sell_risk: dict[str, tuple[str, Decimal]] = {}
         history: list[MarketBar] = []
@@ -327,14 +358,66 @@ class BacktestEngine(Backtester):
                         raise BacktestDataError(
                             f"no supplied dataset for order series {intent.symbol} {timeframe}"
                         )
-                    activation_decision_id = None
-                    if self._activation_policy is not None:
+                    signal = None
+                    regime = None
+                    if (
+                        self._activation_policy is not None
+                        or (
+                            self._ml_scorer is not None
+                            and self._ml_scorer.mode is not MLMode.DISABLED
+                        )
+                    ):
                         signal = self._signal_for_intent(strategy, intent)
                         regime = regimes_at_timestamp.get((intent.symbol, timeframe))
                         if regime is None:
                             raise BacktestConfigurationError(
-                                "policy-filtered intent requires an exact current regime snapshot"
+                                "guarded intent requires an exact current regime snapshot"
                             )
+                    ml_decision_id = None
+                    if (
+                        self._ml_scorer is not None
+                        and self._ml_scorer.mode is not MLMode.DISABLED
+                    ):
+                        assert signal is not None and regime is not None
+                        ml_series_history = tuple(
+                            item
+                            for item in history
+                            if item.symbol == intent.symbol
+                            and item.timeframe == timeframe
+                            and item.timestamp <= bar.timestamp
+                        )
+                        if (
+                            not ml_series_history
+                            or ml_series_history[-1].timestamp != bar.timestamp
+                        ):
+                            raise BacktestDataError(
+                                "ML-scored intent requires an exact current source bar"
+                            )
+                        ml_features = self._feature_engine.compute(
+                            ml_series_history,
+                            self._ml_scorer.feature_request,
+                            as_of=bar.timestamp,
+                        )
+                        prediction, ml_decision = self._ml_scorer.evaluate(
+                            signal=signal,
+                            features=ml_features,
+                            regime=regime,
+                        )
+                        self._validate_ml_decision(signal, prediction, ml_decision)
+                        if prediction is not None:
+                            ml_predictions.append(prediction)
+                        ml_decisions.append(ml_decision)
+                        strategy.on_ml_decision(ml_decision)
+                        ml_decision_id = ml_decision.decision_id
+                        if (
+                            signal.action is StrategySignalAction.ENTER_LONG
+                            and self._ml_scorer.mode is MLMode.FILTER
+                            and ml_decision.status is not MLFilterStatus.PASS
+                        ):
+                            continue
+                    activation_decision_id = None
+                    if self._activation_policy is not None:
+                        assert signal is not None and regime is not None
                         activation = self._activation_policy.evaluate(
                             strategy_name=strategy.name,
                             strategy_version=strategy.version,
@@ -378,6 +461,7 @@ class BacktestEngine(Backtester):
                         order_type=intent.order_type,
                         limit_price=intent.limit_price,
                         strategy_decision_id=intent.signal_id,
+                        ml_decision_id=ml_decision_id,
                         activation_decision_id=activation_decision_id,
                         created_at=bar.timestamp,
                         expected_entry_price=expected_entry_price,
@@ -448,6 +532,7 @@ class BacktestEngine(Backtester):
                             created_at=bar.timestamp,
                             limit_price=intent.limit_price,
                             signal_id=intent.signal_id,
+                            ml_decision_id=ml_decision_id,
                             activation_decision_id=activation_decision_id,
                             risk_decision_id=risk_decision.decision_id,
                             status=OrderStatus.REJECTED,
@@ -472,6 +557,7 @@ class BacktestEngine(Backtester):
                         created_at=bar.timestamp,
                         limit_price=intent.limit_price,
                         signal_id=intent.signal_id,
+                        ml_decision_id=ml_decision_id,
                         activation_decision_id=activation_decision_id,
                         risk_decision_id=risk_decision.decision_id,
                     )
@@ -627,6 +713,18 @@ class BacktestEngine(Backtester):
             if self._activation_policy is not None
             else "0" * 64
         )
+        ml_mode = (
+            self._ml_scorer.mode
+            if self._ml_scorer is not None
+            else MLMode.DISABLED
+        )
+        ml_artifact = (
+            self._ml_scorer.artifact
+            if self._ml_scorer is not None and ml_mode is not MLMode.DISABLED
+            else None
+        )
+        ml_prediction_tuple = tuple(ml_predictions)
+        ml_decision_tuple = tuple(ml_decisions)
         run_identity = {
             "strategy_name": strategy.name,
             "strategy_version": strategy.version,
@@ -648,6 +746,18 @@ class BacktestEngine(Backtester):
             "strategy_policy_version": strategy_policy_version,
             "strategy_policy_config": strategy_policy_config,
             "strategy_policy_config_hash": strategy_policy_config_hash,
+            "ml_mode": ml_mode.value,
+            "ml_model_id": ml_artifact.model_id if ml_artifact else None,
+            "ml_model_artifact_hash": (
+                ml_artifact.artifact_checksum if ml_artifact else None
+            ),
+            "ml_model_config": ml_artifact.model_config if ml_artifact else (),
+            "ml_split_config": ml_artifact.split_config if ml_artifact else (),
+            "ml_threshold": (
+                self._ml_scorer.threshold
+                if self._ml_scorer is not None and ml_mode is MLMode.FILTER
+                else None
+            ),
         }
         run_id = f"bt-{stable_hash(run_identity)[:24]}"
         created_at = datetime.now(timezone.utc)
@@ -694,6 +804,42 @@ class BacktestEngine(Backtester):
             "regime_transitions": regime_transition_tuple,
             "activation_decisions": activation_decision_tuple,
             "regime_report": regime_report,
+            "ml_mode": ml_mode.value,
+            "ml_model_id": ml_artifact.model_id if ml_artifact else None,
+            "ml_model_family": (
+                ml_artifact.model_family.value if ml_artifact else None
+            ),
+            "ml_model_version": ml_artifact.model_version if ml_artifact else None,
+            "ml_model_status": (
+                ml_artifact.status.value if ml_artifact else None
+            ),
+            "ml_model_artifact_hash": (
+                ml_artifact.artifact_checksum if ml_artifact else None
+            ),
+            "ml_base_feature_schema_version": (
+                ml_artifact.feature_schema_version if ml_artifact else None
+            ),
+            "ml_feature_schema_version": (
+                ml_artifact.ml_feature_schema_version if ml_artifact else None
+            ),
+            "ml_feature_names": ml_artifact.feature_names if ml_artifact else (),
+            "ml_label_config": ml_artifact.label_config if ml_artifact else (),
+            "ml_split_config": ml_artifact.split_config if ml_artifact else (),
+            "ml_model_config": ml_artifact.model_config if ml_artifact else (),
+            "ml_threshold": (
+                self._ml_scorer.threshold
+                if self._ml_scorer is not None and ml_mode is MLMode.FILTER
+                else None
+            ),
+            "ml_training_period": (
+                ml_artifact.training_period if ml_artifact else None
+            ),
+            "ml_validation_period": (
+                ml_artifact.validation_period if ml_artifact else None
+            ),
+            "ml_test_period": ml_artifact.test_period if ml_artifact else None,
+            "ml_predictions": ml_prediction_tuple,
+            "ml_decisions": ml_decision_tuple,
         }
         result_values["result_hash"] = stable_result_hash(result_values)
         return BacktestResult(**result_values)
@@ -770,6 +916,39 @@ class BacktestEngine(Backtester):
             raise BacktestConfigurationError(
                 "ActivationPolicy may never increase the strategy proposal"
             )
+
+    @staticmethod
+    def _validate_ml_decision(
+        signal: StrategySignal,
+        prediction: MLPrediction | None,
+        decision: MLFilterDecision,
+    ) -> None:
+        if not isinstance(decision, MLFilterDecision):
+            raise BacktestConfigurationError("MLScorer must return MLFilterDecision")
+        if decision.signal_id != signal.signal_id:
+            raise BacktestConfigurationError(
+                "MLFilterDecision must reference the exact strategy signal"
+            )
+        if prediction is not None:
+            if not isinstance(prediction, MLPrediction):
+                raise BacktestConfigurationError("MLScorer returned invalid prediction")
+            if prediction.prediction_id != decision.prediction_id:
+                raise BacktestConfigurationError(
+                    "ML decision and prediction lineage do not match"
+                )
+            if prediction.timestamp != signal.timestamp or prediction.symbol != signal.symbol:
+                raise BacktestConfigurationError(
+                    "ML prediction must describe the exact signal event"
+                )
+        elif decision.prediction_id is not None:
+            raise BacktestConfigurationError(
+                "ML decision references a missing prediction"
+            )
+        if (
+            signal.action is StrategySignalAction.EXIT_LONG
+            and decision.status is MLFilterStatus.BLOCK
+        ):
+            raise BacktestConfigurationError("ML must never block EXIT_LONG")
 
     @staticmethod
     def _portfolio_with_pending_buys(

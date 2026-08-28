@@ -10,6 +10,7 @@ from trading_ai.backtesting.models import OrderIntent, StrategyContext, Strategy
 from trading_ai.core.models import OrderSide, OrderType
 
 if TYPE_CHECKING:
+    from trading_ai.ml.decisions import MLFilterDecision
     from trading_ai.regimes.models import ActivationDecision
 
 
@@ -42,6 +43,11 @@ class BacktestStrategy(ABC):
 
     def on_activation_decision(self, decision: ActivationDecision) -> None:
         """Observe policy outcome only to maintain deterministic proposal state."""
+
+        del decision
+
+    def on_ml_decision(self, decision: MLFilterDecision) -> None:
+        """Observe filtering only to maintain deterministic proposal state."""
 
         del decision
 

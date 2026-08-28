@@ -1,4 +1,4 @@
-"""Safety, data, risk, regime, strategy, and offline backtest commands."""
+"""Safety, data, risk, regime, strategy, ML, and offline backtest commands."""
 
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ from trading_ai.backtesting.models import (
     DataQualityPolicy,
 )
 from trading_ai.backtesting.storage import BacktestResultStore
+from trading_ai.backtesting.reproducibility import to_primitive
 from trading_ai.backtesting.strategy import BuyAndHoldDemoStrategy
 from trading_ai.core.config import inspect_profile, load_runtime_settings
 from trading_ai.core.exceptions import TradingAIError
@@ -43,6 +44,22 @@ from trading_ai.risk.config import (
     risk_config_hash,
 )
 from trading_ai.features import FeatureEngine
+from trading_ai.ml import (
+    InferenceEngine,
+    LabelConfig,
+    LocalModelRegistry,
+    MLMode,
+    ModelConfig,
+    ModelFamily,
+    ModelStatus,
+    SignalMLScorer,
+    SignalTrainingDatasetBuilder,
+    TemporalSplitConfig,
+    TimeRange,
+    TrainingConfig,
+    TrainingPipeline,
+)
+from trading_ai.ml.exceptions import MLError
 from trading_ai.regimes import (
     BalancedRegimeDetector,
     BalancedStrategyActivationPolicy,
@@ -107,7 +124,9 @@ def _parse_decimal(value: str) -> Decimal:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="trading-ai",
-        description="Trading AI diagnostics, historical data, and offline backtests",
+        description=(
+            "Trading AI diagnostics, historical data, governed ML, and offline backtests"
+        ),
     )
     commands = parser.add_subparsers(dest="command", required=True)
     doctor_parser = commands.add_parser(
@@ -245,6 +264,22 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="accept DataQuality WARNING datasets; FAIL is always rejected",
     )
+    run_parser.add_argument(
+        "--ml-mode",
+        choices=("disabled", "score-only", "filter"),
+        default="disabled",
+        help="disabled (default), score-only, or APPROVED-model filter",
+    )
+    run_parser.add_argument(
+        "--ml-model-id",
+        help="explicit local registry model ID; no latest-model fallback exists",
+    )
+    run_parser.add_argument(
+        "--ml-threshold",
+        type=float,
+        default=0.55,
+        help="fixed FILTER probability threshold (default: 0.55)",
+    )
     _add_store_arguments(run_parser)
 
     inspect_backtest_parser = backtest_commands.add_parser(
@@ -317,6 +352,71 @@ def build_parser() -> argparse.ArgumentParser:
         "--profile", default=os.getenv("TRADING_AI_PROFILE", "balanced")
     )
     regime_policy.add_argument("--json", action="store_true", dest="as_json")
+
+    ml_parser = commands.add_parser(
+        "ml", help="train, inspect, and explicitly promote local statistical models"
+    )
+    ml_commands = ml_parser.add_subparsers(dest="ml_command", required=True)
+    ml_train = ml_commands.add_parser(
+        "train", help="train one fixed tabular baseline from exact cached data"
+    )
+    ml_train.add_argument("--strategy", required=True, choices=BASELINE_STRATEGIES.names)
+    ml_train.add_argument("--timeframe", required=True, choices=("1h", "4h", "1d"))
+    ml_train.add_argument(
+        "--model", required=True, choices=tuple(item.value for item in ModelFamily)
+    )
+    ml_train.add_argument(
+        "--symbol",
+        action="append",
+        help="configured symbol; repeat for multi-asset training (default: profile universe)",
+    )
+    ml_train.add_argument(
+        "--profile", default=os.getenv("TRADING_AI_PROFILE", "balanced")
+    )
+    for name in (
+        "train-start", "train-end", "validation-start", "validation-end",
+        "test-start", "test-end",
+    ):
+        ml_train.add_argument(f"--{name}", required=True, type=_parse_datetime)
+    ml_train.add_argument("--horizon-bars", type=int, default=5)
+    ml_train.add_argument(
+        "--minimum-forward-return-bps", type=_parse_decimal, default=Decimal("0")
+    )
+    ml_train.add_argument("--embargo-bars", type=int, default=1)
+    ml_train.add_argument("--walk-forward-folds", type=int, default=3)
+    ml_train.add_argument("--minimum-training-samples", type=int, default=100)
+    ml_train.add_argument("--minimum-samples-per-class", type=int, default=20)
+    _add_store_arguments(ml_train)
+
+    ml_evaluate = ml_commands.add_parser(
+        "evaluate", help="inspect stored temporal validation and final-test metrics"
+    )
+    ml_evaluate.add_argument("--model-id", required=True)
+    _add_store_arguments(ml_evaluate)
+
+    model_parser = ml_commands.add_parser("model", help="manage the local model registry")
+    model_commands = model_parser.add_subparsers(dest="model_command", required=True)
+    model_list = model_commands.add_parser("list", help="list registered model artifacts")
+    _add_store_arguments(model_list)
+    model_inspect = model_commands.add_parser("inspect", help="verify and inspect one model")
+    model_inspect.add_argument("--model-id", required=True)
+    _add_store_arguments(model_inspect)
+    model_promote = model_commands.add_parser(
+        "promote", help="perform one explicit audited lifecycle transition"
+    )
+    model_promote.add_argument("--model-id", required=True)
+    model_promote.add_argument(
+        "--to", required=True, choices=("VALIDATED", "APPROVED", "RETIRED")
+    )
+    model_promote.add_argument("--reason", required=True)
+    _add_store_arguments(model_promote)
+    model_rollback = model_commands.add_parser(
+        "rollback", help="explicitly restore the prior APPROVED alias"
+    )
+    model_rollback.add_argument("--strategy", required=True, choices=BASELINE_STRATEGIES.names)
+    model_rollback.add_argument("--timeframe", required=True, choices=("1h", "4h", "1d"))
+    model_rollback.add_argument("--reason", required=True)
+    _add_store_arguments(model_rollback)
     return parser
 
 
@@ -700,6 +800,116 @@ def _run_regime(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_ml(args: argparse.Namespace) -> int:
+    registry = LocalModelRegistry(args.data_root / "ml")
+    if args.ml_command == "evaluate":
+        payload = registry.inspect(args.model_id)
+        print(_render_payload(payload["evaluation"], args.as_json))
+        return 0
+    if args.ml_command == "model":
+        if args.model_command == "list":
+            payload = [to_primitive(artifact) for artifact in registry.list()]
+        elif args.model_command == "inspect":
+            payload = registry.inspect(args.model_id)
+        elif args.model_command == "promote":
+            payload = to_primitive(
+                registry.promote(
+                    args.model_id,
+                    ModelStatus(args.to),
+                    reason=args.reason,
+                )
+            )
+        elif args.model_command == "rollback":
+            payload = to_primitive(
+                registry.rollback(
+                    args.strategy,
+                    args.timeframe,
+                    reason=args.reason,
+                )
+            )
+        else:
+            raise AssertionError(f"unhandled model command: {args.model_command}")
+        print(_render_payload(payload, args.as_json))
+        return 0
+    if args.ml_command != "train":
+        raise AssertionError(f"unhandled ML command: {args.ml_command}")
+
+    settings = load_runtime_settings("PAPER", args.profile)
+    symbols = tuple(dict.fromkeys(args.symbol or settings.profile.asset_universe))
+    if any(symbol not in settings.profile.asset_universe for symbol in symbols):
+        raise ValueError("ML training symbols must come from profile configuration")
+    store = ParquetDataStore(args.data_root)
+    datasets = tuple(
+        load_cached_dataset(
+            store,
+            symbol=symbol,
+            timeframe=args.timeframe,
+            start=args.train_start,
+            end=args.test_end,
+        )
+        for symbol in sorted(symbols)
+    )
+    strategy = BASELINE_STRATEGIES.create(
+        args.strategy,
+        symbols=symbols,
+        timeframe=args.timeframe,
+        config=None,
+    )
+    feature_engine = FeatureEngine()
+    quant_result = BacktestEngine(
+        risk_engine=BalancedRiskEngine.from_profile(settings.profile),
+        feature_engine=feature_engine,
+        regime_detector=BalancedRegimeDetector.from_profile(settings.profile),
+        activation_policy=BalancedStrategyActivationPolicy.from_profile(
+            settings.profile
+        ),
+    ).run(
+        strategy,
+        datasets,
+        settings.context,
+        BacktestConfig(
+            starting_cash=Decimal("100000"),
+            primary_timeframe=args.timeframe,
+            benchmark_symbol=symbols[0],
+            data_quality_policy=DataQualityPolicy.STRICT,
+        ),
+    )
+    label_config = LabelConfig(
+        horizon_bars=args.horizon_bars,
+        minimum_forward_return_bps=args.minimum_forward_return_bps,
+    )
+    build_result = SignalTrainingDatasetBuilder(
+        label_config=label_config
+    ).build(quant_result, datasets)
+    split_config = TemporalSplitConfig(
+        training=TimeRange(args.train_start, args.train_end),
+        validation=TimeRange(args.validation_start, args.validation_end),
+        final_test=TimeRange(args.test_start, args.test_end),
+        embargo_bars=args.embargo_bars,
+        walk_forward_folds=args.walk_forward_folds,
+    )
+    outcome = TrainingPipeline(
+        config=TrainingConfig(
+            minimum_training_samples=args.minimum_training_samples,
+            minimum_samples_per_class=args.minimum_samples_per_class,
+        )
+    ).run(
+        build_result.dataset,
+        split_config=split_config,
+        model_config=ModelConfig(family=ModelFamily(args.model)),
+    )
+    artifact = registry.save(outcome)
+    payload = {
+        "artifact": to_primitive(artifact),
+        "dataset_build": to_primitive(build_result.report),
+        "evaluation": to_primitive(outcome.evaluation),
+        "network_access": False,
+        "automatic_promotion": False,
+    }
+    print(_render_payload(payload, args.as_json))
+    return 0
+
+
 def _run_backtest(args: argparse.Namespace) -> int:
     result_store = BacktestResultStore(args.data_root / "backtests")
     if args.backtest_command == "inspect":
@@ -734,6 +944,7 @@ def _run_backtest(args: argparse.Namespace) -> int:
     )
     regime_detector = None
     activation_policy = None
+    ml_scorer = None
     shared_feature_engine = FeatureEngine()
     if args.strategy == "buy-and-hold":
         strategy = BuyAndHoldDemoStrategy(symbols[0], args.quantity)
@@ -748,6 +959,28 @@ def _run_backtest(args: argparse.Namespace) -> int:
         regime_detector = BalancedRegimeDetector.from_profile(settings.profile)
         activation_policy = BalancedStrategyActivationPolicy.from_profile(
             settings.profile
+        )
+    ml_mode = MLMode(args.ml_mode.upper().replace("-", "_"))
+    if ml_mode is MLMode.DISABLED:
+        if args.ml_model_id is not None:
+            raise ValueError("--ml-model-id requires score-only or filter mode")
+    else:
+        if args.strategy == "buy-and-hold":
+            raise ValueError("ML scoring applies to quantitative baseline signals only")
+        if args.ml_model_id is None:
+            raise ValueError("active ML mode requires explicit --ml-model-id")
+        artifact, adapter, _ = LocalModelRegistry(
+            args.data_root / "ml"
+        ).load(
+            args.ml_model_id,
+            strategy_name=strategy.name,
+            strategy_version=strategy.version,
+            timeframe=args.timeframe,
+        )
+        ml_scorer = SignalMLScorer(
+            mode=ml_mode,
+            inference_engine=InferenceEngine(artifact, adapter),
+            threshold=args.ml_threshold,
         )
     config = BacktestConfig(
         starting_cash=args.starting_cash,
@@ -773,6 +1006,7 @@ def _run_backtest(args: argparse.Namespace) -> int:
         feature_engine=shared_feature_engine,
         regime_detector=regime_detector,
         activation_policy=activation_policy,
+        ml_scorer=ml_scorer,
     ).run(
         strategy,
         datasets,
@@ -839,6 +1073,24 @@ def _run_backtest(args: argparse.Namespace) -> int:
             if result.regime_report is not None
             else {"status": "unavailable"}
         ),
+        "ml": {
+            "mode": result.ml_mode,
+            "model_id": result.ml_model_id,
+            "model_family": result.ml_model_family,
+            "model_status": result.ml_model_status,
+            "threshold": result.ml_threshold,
+            "predictions": len(result.ml_predictions),
+            "pass": sum(
+                decision.status.value == "PASS" for decision in result.ml_decisions
+            ),
+            "block": sum(
+                decision.status.value == "BLOCK" for decision in result.ml_decisions
+            ),
+            "unavailable": sum(
+                decision.status.value == "UNAVAILABLE"
+                for decision in result.ml_decisions
+            ),
+        },
         "strategy_parameters": dict(result.strategy_parameters),
         "export_path": str(export_directory),
         "warnings": list(result.warnings),
@@ -864,7 +1116,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_risk(args)
         if args.command == "regime":
             return _run_regime(args)
-    except (BacktestError, DataError, RegimeError, TradingAIError, ValueError) as exc:
+        if args.command == "ml":
+            return _run_ml(args)
+    except (BacktestError, DataError, RegimeError, MLError, TradingAIError, ValueError) as exc:
         if getattr(args, "as_json", False):
             print(json.dumps({"status": "ERROR", "error": str(exc)}))
         else:

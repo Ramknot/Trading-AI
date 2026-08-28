@@ -32,3 +32,6 @@ jobs:
 
       - name: Run tests
         run: python -m pytest -m "not integration"
+
+      - name: Verify dependency consistency
+        run: python -m pip check

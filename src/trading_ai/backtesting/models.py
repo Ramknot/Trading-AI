@@ -354,6 +354,7 @@ class BacktestOrder:
     order_type: OrderType
     created_at: datetime
     signal_id: str | None = None
+    ml_decision_id: str | None = None
     activation_decision_id: str | None = None
     risk_decision_id: str | None = None
     status: OrderStatus = OrderStatus.PENDING
@@ -369,6 +370,8 @@ class BacktestOrder:
         _require_aware(self.created_at, "created_at")
         if self.signal_id is not None:
             _require_text(self.signal_id, "signal_id")
+        if self.ml_decision_id is not None:
+            _require_text(self.ml_decision_id, "ml_decision_id")
         if self.activation_decision_id is not None:
             _require_text(self.activation_decision_id, "activation_decision_id")
         if self.risk_decision_id is not None:

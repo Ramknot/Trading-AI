@@ -41,7 +41,7 @@ These rules apply to Codex and every future development agent working in this re
 - Baseline strategy parameters must not be tuned solely to maximize historical performance.
 - Strategies must use shared `FeatureEngine` definitions instead of reimplementing indicators independently.
 - Mean Reversion may open new positions only in an eligible `RANGE` regime.
-- Machine learning must not be introduced before the dedicated ML lot.
+- Machine learning must be introduced only through its dedicated, governed ML lot and contracts.
 - Strategy defaults are research baselines, not optimized parameters.
 - The Risk Engine must never increase a requested position size.
 - Risk-reducing exits must remain possible when new risk is halted.
@@ -64,4 +64,19 @@ These rules apply to Codex and every future development agent working in this re
 - Mean Reversion must not average down or use martingale sizing.
 - The Lot 5 Regime Detector must remain deterministic and must not introduce machine learning.
 - Regime modules must not contact data providers or brokers.
+- Machine-learning models must score existing quantitative opportunities; they must not bypass strategy, regime policy, or risk controls.
+- ML must never increase a strategy-proposed position size.
+- `EXIT_LONG` signals must never be blocked by ML filtering.
+- Training and inference must remain separate execution paths.
+- Inference code must never fit, retrain, partially fit, or update a model.
+- Model inputs at time `t` must never contain information from `t+1` or later.
+- Future-derived values are permitted only inside explicit label construction.
+- Temporal validation must never use random shuffling.
+- Final test data must not participate in model fitting, preprocessing, threshold selection, feature selection, or model selection.
+- Overlapping labels must be purged across temporal split boundaries.
+- Models must never be promoted automatically based on historical profitability or classification metrics.
+- `FILTER` mode requires an explicitly `APPROVED` model.
+- No silent model fallback is permitted; artifact or schema failures must fail closed for new entries.
+- ML architecture must depend on `ModelAdapter` contracts rather than directly on scikit-learn classes.
+- Sequence, Transformer, multimodal, real-time, and online-learning capabilities remain PLANNED/LOCKED until Balanced validation.
 - Update `PROJECT_STATE.md` when a lot changes state.

@@ -13,7 +13,7 @@ from trading_ai.backtesting.reproducibility import to_primitive
 from trading_ai.core.models import BacktestResult
 
 
-RESULT_SCHEMA_VERSION = "1.3"
+RESULT_SCHEMA_VERSION = "1.4"
 _SAFE_RUN_ID = re.compile(r"^[A-Za-z0-9_-]+$")
 _EXPORTED_FILES = frozenset(
     {
@@ -29,9 +29,15 @@ _EXPORTED_FILES = frozenset(
         "regime_snapshots.parquet",
         "regime_transitions.parquet",
         "activation_decisions.parquet",
+        "ml_predictions.parquet",
+        "ml_decisions.parquet",
     }
 )
-_LOT4_EXPORTED_FILES = _EXPORTED_FILES - {
+_LOT5_EXPORTED_FILES = _EXPORTED_FILES - {
+    "ml_predictions.parquet",
+    "ml_decisions.parquet",
+}
+_LOT4_EXPORTED_FILES = _LOT5_EXPORTED_FILES - {
     "regime_snapshots.parquet",
     "regime_transitions.parquet",
     "activation_decisions.parquet",
@@ -171,6 +177,7 @@ class BacktestResultStore:
                 ("completed_at", pa.string()),
                 ("eligible_bar_count", pa.int64()),
                 ("signal_id", pa.string()),
+                ("ml_decision_id", pa.string()),
                 ("activation_decision_id", pa.string()),
                 ("risk_decision_id", pa.string()),
             ]
@@ -279,6 +286,51 @@ class BacktestResultStore:
         )
 
     @staticmethod
+    def _ml_prediction_schema():
+        import pyarrow as pa
+
+        return pa.schema(
+            [
+                ("prediction_id", pa.string()),
+                ("timestamp", pa.string()),
+                ("symbol", pa.string()),
+                ("strategy_name", pa.string()),
+                ("strategy_version", pa.string()),
+                ("model_id", pa.string()),
+                ("model_family", pa.string()),
+                ("model_version", pa.string()),
+                ("probability_positive", pa.float64()),
+                ("feature_schema_version", pa.string()),
+                ("ml_feature_schema_version", pa.string()),
+                ("input_hash", pa.string()),
+                ("model_artifact_hash", pa.string()),
+                ("inference_mode", pa.string()),
+                ("technical_latency_ms", pa.float64()),
+            ]
+        )
+
+    @staticmethod
+    def _ml_decision_schema():
+        import pyarrow as pa
+
+        return pa.schema(
+            [
+                ("decision_id", pa.string()),
+                ("timestamp", pa.string()),
+                ("symbol", pa.string()),
+                ("signal_id", pa.string()),
+                ("mode", pa.string()),
+                ("status", pa.string()),
+                ("threshold", pa.float64()),
+                ("probability", pa.float64()),
+                ("reason_code", pa.string()),
+                ("human_reason", pa.string()),
+                ("model_id", pa.string()),
+                ("prediction_id", pa.string()),
+            ]
+        )
+
+    @staticmethod
     def _risk_state_schema():
         import pyarrow as pa
 
@@ -383,6 +435,26 @@ class BacktestResultStore:
                     "policy_config_hash": result.strategy_policy_config_hash,
                     "report": result.regime_report,
                 },
+                "ml": {
+                    "mode": result.ml_mode,
+                    "model_id": result.ml_model_id,
+                    "model_family": result.ml_model_family,
+                    "model_version": result.ml_model_version,
+                    "model_status": result.ml_model_status,
+                    "model_artifact_hash": result.ml_model_artifact_hash,
+                    "base_feature_schema_version": (
+                        result.ml_base_feature_schema_version
+                    ),
+                    "ml_feature_schema_version": result.ml_feature_schema_version,
+                    "feature_names": result.ml_feature_names,
+                    "label_config": result.ml_label_config,
+                    "split_config": result.ml_split_config,
+                    "model_config": result.ml_model_config,
+                    "threshold": result.ml_threshold,
+                    "training_period": result.ml_training_period,
+                    "validation_period": result.ml_validation_period,
+                    "test_period": result.ml_test_period,
+                },
                 "counts": {
                     "equity_points": len(result.equity_curve),
                     "orders": len(result.orders),
@@ -395,6 +467,8 @@ class BacktestResultStore:
                     "regime_snapshots": len(result.regime_snapshots),
                     "regime_transitions": len(result.regime_transitions),
                     "activation_decisions": len(result.activation_decisions),
+                    "ml_predictions": len(result.ml_predictions),
+                    "ml_decisions": len(result.ml_decisions),
                 },
             }
         )
@@ -462,6 +536,16 @@ class BacktestResultStore:
                 (to_primitive(decision) for decision in result.activation_decisions),
                 self._activation_decision_schema(),
             )
+            self._write_parquet(
+                directory / "ml_predictions.parquet",
+                (to_primitive(prediction) for prediction in result.ml_predictions),
+                self._ml_prediction_schema(),
+            )
+            self._write_parquet(
+                directory / "ml_decisions.parquet",
+                (to_primitive(decision) for decision in result.ml_decisions),
+                self._ml_decision_schema(),
+            )
             checksums = {
                 name: _sha256_file(directory / name)
                 for name in sorted(_EXPORTED_FILES)
@@ -491,6 +575,7 @@ class BacktestResultStore:
             exported_files = frozenset(payload["files"])
             if exported_files not in {
                 _EXPORTED_FILES,
+                _LOT5_EXPORTED_FILES,
                 _LOT4_EXPORTED_FILES,
                 _LOT3_EXPORTED_FILES,
                 _LOT2_EXPORTED_FILES,
@@ -518,6 +603,7 @@ class BacktestResultStore:
                 "1.0": _LOT2_EXPORTED_FILES,
                 "1.1": _LOT3_EXPORTED_FILES,
                 "1.2": _LOT4_EXPORTED_FILES,
+                "1.3": _LOT5_EXPORTED_FILES,
                 RESULT_SCHEMA_VERSION: _EXPORTED_FILES,
             }.get(summary.get("schema_version"))
             if expected_files is None or exported_files != expected_files:
@@ -543,4 +629,6 @@ class BacktestResultStore:
         )
         if "regime" not in payload:
             payload["regime"] = {"status": "unavailable"}
+        if "ml" not in payload:
+            payload["ml"] = {"status": "unavailable / not used"}
         return payload

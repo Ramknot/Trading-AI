@@ -9,7 +9,7 @@
 - Lot 3 — Feature Engine & Quantitative Baselines: DONE
 - Lot 4 — Balanced Risk Engine: DONE
 - Lot 5 — Regime Detector + Mean Reversion + Strategy Activation: DONE
-- Lot 6 — Machine Learning: TODO
+- Lot 6 — ML Platform Foundation & Statistical Scoring: DONE
 - Lot 7 — Portfolio Engine: TODO
 - Lot 8 — Dashboard: TODO
 - Lot 9 — Broker / Paper Trading: TODO
@@ -19,6 +19,12 @@
 Status: LOCKED
 
 The aggressive profile is represented in the configuration schema for forward compatibility, but Lot 0 rejects its activation unconditionally.
+
+## Future ML Evolution
+
+Status: PLANNED / LOCKED
+
+Sequence models, Temporal CNN, LSTM/GRU, Temporal Transformers, cross-sectional neural models, news/sentiment and macro inputs, bid/ask and order-book data, multimodal fusion, real-time inference, justified GPU inference, and controlled online-learning research remain locked until the Balanced platform is validated and the current components demonstrate value.
 
 ## Lot 1 delivery summary
 
@@ -38,4 +44,8 @@ Delivered: explicitly injected `BalancedRiskEngine` 1.0 with immutable APPROVE/R
 
 ## Lot 5 delivery summary
 
-Delivered: Feature Engine schema 1.1 with Efficiency Ratio, historical volatility percentile, and price z-score; deterministic `BalancedRegimeDetector` 1.0 with separate structure/volatility axes, conservative UNKNOWN, confirmation and transitions; TOML-driven `BalancedStrategyActivationPolicy` 1.0 with monotonic ALLOW/REDUCE/BLOCK decisions; long-only Mean Reversion 1.0 restricted to eligible RANGE context with no averaging down; exact signal/regime/activation/order/risk/fill lineage; Momentum per-asset regime filtering; schema 1.3 JSON/Parquet exports and backward inspection through schema 1.0; offline regime/policy CLI diagnostics; append-future, determinism, safety, integration, and architecture tests. Lot 6 remains TODO and Aggressive Research remains LOCKED.
+Delivered: Feature Engine schema 1.1 with Efficiency Ratio, historical volatility percentile, and price z-score; deterministic `BalancedRegimeDetector` 1.0 with separate structure/volatility axes, conservative UNKNOWN, confirmation and transitions; TOML-driven `BalancedStrategyActivationPolicy` 1.0 with monotonic ALLOW/REDUCE/BLOCK decisions; long-only Mean Reversion 1.0 restricted to eligible RANGE context with no averaging down; exact signal/regime/activation/order/risk/fill lineage; Momentum per-asset regime filtering; schema 1.3 JSON/Parquet exports and backward inspection through schema 1.0; offline regime/policy CLI diagnostics; append-future, determinism, safety, integration, and architecture tests. Aggressive Research remains LOCKED.
+
+## Lot 6 delivery summary
+
+Delivered: framework-neutral `ModelAdapter`, `ModelTrainer`, `ModelRegistry`, and inference contracts with TABULAR operational and future input kinds reserved; ML feature schema 1.0 built only from shared point-in-time features/regimes; explicit next-bar-open/horizon-close labels; purged and embargoed chronological TRAIN/VALIDATION/FINAL TEST with expanding walk-forward validation; fixed Logistic Regression, Random Forest, and Gradient Boosting adapters; deterministic training and classification reports; checksum-verified local model registry with audited CANDIDATE/VALIDATED/APPROVED/RETIRED promotion and rollback; DISABLED/SCORE_ONLY/FILTER modes with exits always permitted and approved-model fail-closed filtering; ML/policy/risk sovereignty and lineage; schema 1.4 exports and backward inspection through schema 1.3; offline ML CLI, integration, leakage, reproducibility, and architecture tests. No broker, neural network, streaming, or online-learning path was added. Future ML Evolution and Aggressive Research remain LOCKED.

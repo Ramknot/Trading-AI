@@ -49,6 +49,8 @@ def stable_result_hash(value: Any) -> str:
     payload = dict(to_primitive(value))
     payload.pop("created_at", None)
     payload.pop("result_hash", None)
+    for prediction in payload.get("ml_predictions", []):
+        prediction.pop("technical_latency_ms", None)
     return stable_hash(payload)
 
 
