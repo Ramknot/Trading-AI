@@ -1,6 +1,6 @@
 # Trading AI
 
-Trading AI is a safety-first, modular Python project for reproducible market research, paper trading, and future controlled execution. Lot 7 adds deterministic multi-strategy portfolio construction and capital allocation to the foundations, data, backtesting, feature, regime, risk, and statistical-scoring layers delivered in Lots 0 through 6. Trend, Momentum, Breakout, and Mean Reversion can now share one cash balance, physical position ledger, and risk state while retaining distinct logical strategy sleeves. Portfolio construction proposes targets; `BalancedRiskEngine` remains the final authority on every simulated order.
+Trading AI is a safety-first, modular Python project for reproducible market research, paper trading, and future controlled execution. Lot 8 adds a local read-only Dashboard and an observability boundary over the foundations, data, backtesting, feature, regime, ML, portfolio, and risk layers delivered in Lots 0 through 7. It makes verified backtest state, provenance, decisions, health, and cost coverage understandable without moving business logic into the UI. Portfolio construction still proposes targets; `BalancedRiskEngine` remains the final authority on every simulated order.
 
 ## Safety guarantees
 
@@ -37,6 +37,7 @@ src/trading_ai/portfolio/         deterministic sleeves, allocation, netting, FX
 src/trading_ai/risk/              mandatory gate, Balanced limits/state/guards/reporting
 src/trading_ai/execution/         sealed risk-gated ExecutionEngine
 src/trading_ai/brokers/           BrokerAdapter contract
+src/trading_ai/monitoring/        immutable events/snapshots, SQLite, API, local Dashboard
 src/trading_ai/backtesting/
   engine.py                       chronological event loop and safety validation
   strategy.py                     look-ahead-safe strategy API and technical CLI demo
@@ -88,7 +89,7 @@ python -m venv .venv
 .\.venv\Scripts\python -m pip install -e ".[dev]"
 ```
 
-Runtime dependencies remain deliberately limited to `pandas`, `pyarrow`, `yfinance`, `pandas-market-calendars`, and the Lot 6 tabular baseline dependency `scikit-learn`. No external backtesting, indicator, risk, regime, neural-network, registry-server, or streaming framework is used. `pytest` is the development dependency. Yahoo Finance is a development/research source, not a guaranteed production or live-trading feed.
+Runtime dependencies remain deliberately limited to the data/research stack (`pandas`, `pyarrow`, `yfinance`, `pandas-market-calendars`, `scikit-learn`) plus the Lot 8 local web stack (`FastAPI`, `Jinja2`, and `Uvicorn`). `HTTPX` is used only by development tests. No external backtesting, indicator, risk, regime, neural-network, registry-server, cloud-monitoring, or streaming framework is used. Yahoo Finance is a development/research source, not a guaranteed production or live-trading feed.
 
 ## Data Engine
 
@@ -455,6 +456,62 @@ Every decision records its stable ID, order ID, engine/version, status, requeste
 
 The risk layer remains offline and simulated. It has no FX conversion, real broker state reconciliation, order-book/liquidity impact, portfolio optimizer, automatic liquidation, or proof that its limits are sufficient for live markets. Regime classification remains a separate upstream context layer and never changes Risk Engine sovereignty.
 
+## Dashboard & Observability
+
+### Architecture and trust boundary
+
+Lot 8 adds an observability layer without moving calculations or decisions into the web interface:
+
+```text
+Trading AI engines
+      -> immutable MonitoringEvent / MonitoringSnapshot contracts
+      -> BacktestMonitoringSource + local SQLiteMonitoringStore
+      -> deterministic read models
+      -> versioned local JSON API
+      -> responsive read-only web Dashboard
+```
+
+`BacktestMonitoringSource` accepts only safe run IDs below `data_local/backtests/`, invokes the existing checksum verifier before every trusted read, and supports export schemas `1.0` through `1.5`. A changed or corrupt file is rejected as untrusted. Missing sections in older runs remain `UNAVAILABLE`; they are never synthesized as healthy observations. Parsed Parquet tables are cached in memory by checksum-manifest fingerprint, while integrity is still rechecked before reuse. The source contract is separate from `EventMonitoringSource`, which reserves the same event boundary for a future authenticated Paper/Live session without implementing one now.
+
+Important engine facts are normalized into stable UTC event types covering data quality, features, regimes, signals, ML predictions/decisions, activation, portfolio/risk decisions, order intents, fills, positions, equity, health, and costs. Events retain the run/session, component/version, related IDs, and provenance. `SQLiteMonitoringStore` provides a local standard-library event/snapshot store below the Git-ignored `data_local/monitoring/` tree; there is no cloud database, Redis, Kafka, or monitoring SaaS.
+
+### Pages, API, and local-only operation
+
+The single responsive interface includes Overview, Equity/Drawdown, Portfolio, Strategies, Regimes, ML, Risk, Data Quality, Costs, System Health, searchable decision history, and an order-level Decision Trace. The trace follows available lineage across:
+
+```text
+Dataset -> Feature -> Regime -> Strategy -> Signal -> ML
+        -> Activation -> Portfolio -> Risk -> Order -> Fill
+```
+
+The frontend reads `/api/v1` JSON endpoints for runs, snapshots, overview, equity, portfolio, strategies, regimes, ML, risk, data quality, costs, decisions, events, traces, and health. It never opens Parquet files itself. Polling every five seconds is suitable for local monitoring and preserves a future event-driven source boundary; completed backtests remain static. Values are rendered with DOM `textContent`, templates auto-escape input, and no external CDN is required.
+
+Start the interface with:
+
+```powershell
+trading-ai dashboard serve --host 127.0.0.1 --port 8080
+trading-ai dashboard inspect --run-id bt-0123456789abcdef01234567 --json
+trading-ai monitoring health --json
+```
+
+Lot 8 accepts only loopback hosts (`127.0.0.1`, `localhost`, or `::1`) and defaults to `127.0.0.1`. It has no remote authentication and therefore cannot be exposed automatically on `0.0.0.0` or the public Internet. The Dashboard is strictly read-only: it has no order-entry, configuration mutation, profile activation, or `LIVE` control. Secure remote access and permissions must be designed before any future Paper/Live monitoring deployment.
+
+### Health and decision visibility
+
+System Health reports Data, Feature, Regime, Strategies, ML, Portfolio, Risk, execution simulator, monitoring store, and trading-cost coverage as `HEALTHY`, `WARNING`, `ERROR`, or `UNAVAILABLE`. A disabled or absent component is never shown as healthy. Data provenance exposes dataset/provider/symbol/timeframe/ranges/checksums and warnings from the signed result; quality details not embedded in a historical schema remain explicitly unavailable. The Dashboard does not reopen another dataset and claim it is the one used by the run.
+
+Decision and risk views expose machine-readable reason codes, human explanations, state transitions, circuit-breaker state, and available limits. ML probabilities are shown as statistical outputs, never as certainty. Portfolio views distinguish physical quantities from targets and logical sleeve contributions where exported; detailed sleeve PnL attribution remains unavailable because Lot 7 intentionally did not fabricate it.
+
+### Cost coverage and gross/net display
+
+`TradingCostBreakdown` keeps commission, spread, slippage, exchange fees, transaction tax, FX cost, financing cost, other variable cost, and total variable cost separate. `OperatingCostBreakdown` separately reserves market-data, server/VPS, software/subscription, and other fixed costs. Every component is `KNOWN`, `ESTIMATED`, or `UNAVAILABLE`; an unavailable component cannot carry a numeric zero.
+
+For current backtests, the Dashboard reuses the existing commission, spread, and slippage metrics as `KNOWN`. It does not recalculate those costs. Exchange fees, taxes, FX, financing, other variable costs, and operating costs remain `UNAVAILABLE` unless a future trusted source explicitly supplies them, so coverage is `INCOMPLETE`. `gross_pnl` and `net_pnl_known` describe the modeled backtest economics; `net_pnl_estimated` remains unavailable while critical categories are missing. Cash reservations/free cash also remain unavailable when the export does not contain them. The UI never labels this incomplete view as a complete real-world net result.
+
+Lot 8.1 will implement the configuration-driven `TransactionCostEngine` and economic validation gate for broker commissions, exchange fees, taxes, FX, spread, slippage, financing, round-trip costs, fee-aware cash reservation, and net-edge analysis. Lot 8 contains no hard-coded IBKR tariff, tax rate, or market-data subscription price.
+
+Portfolio construction can diversify exposure but cannot eliminate market risk or guarantee profitability. Monitoring improves visibility; it does not validate profitability or make a backtest predictive.
+
 ## CLI
 
 Safety diagnostics remain available:
@@ -525,7 +582,7 @@ Training replays the selected quant baseline without ML to build candidate examp
 
 ## Tests and CI
 
-The default suite is deterministic, fast, and independent of Yahoo Finance and the network. It uses `FakeDataProvider` plus synthetic sessions, invalid bars, gaps, corporate actions, feature/regime warm-ups, future-append invariance, exact-timestamp relative strength, all four baselines, two-axis classification, confirmation/transitions, activation matrices, Mean Reversion eligibility/exits/no-averaging, monotonic ML/policy/portfolio/risk sizing, chronological labels/splits/purge/embargo, all three tabular adapters, registry integrity/lifecycle, inference modes, multi-strategy batching/netting/diversification/turnover/FX, current-close sizing, shared-ledger Risk integration, backward-compatible tamper-evident exports, and architecture audits. Synthetic patterns validate mechanics only; they are not evidence of market edge or profitability.
+The default suite is deterministic, fast, and independent of Yahoo Finance and the network. It uses `FakeDataProvider` plus synthetic sessions, invalid bars, gaps, corporate actions, feature/regime warm-ups, future-append invariance, exact-timestamp relative strength, all four baselines, two-axis classification, confirmation/transitions, activation matrices, Mean Reversion eligibility/exits/no-averaging, monotonic ML/policy/portfolio/risk sizing, chronological labels/splits/purge/embargo, all three tabular adapters, registry integrity/lifecycle, inference modes, multi-strategy batching/netting/diversification/turnover/FX, current-close sizing, shared-ledger Risk integration, backward-compatible tamper-evident exports, immutable monitoring events, SQLite round trips, all Dashboard API/UI sections, schemas 1.0–1.5, path traversal/corruption refusal, explicit cost incompleteness, full decision traces, local-only serving, and architecture audits. Synthetic patterns validate mechanics only; they are not evidence of market edge or profitability.
 
 ```powershell
 .\.venv\Scripts\python -m compileall -q src
@@ -556,4 +613,4 @@ Expected safety matrix:
 
 ## Roadmap
 
-Lots 0 through 7 now provide foundations, universe/CI alignment, historical data, deterministic simulation, shared Feature Engine 1.1, four quantitative research baselines, the offline Balanced Risk Engine, two-axis rule-based regime classification, governed tabular ML scoring, and deterministic multi-strategy portfolio construction. Lot 8 remains TODO for dashboarding/monitoring and Lot 9 for broker/paper integration. Neural, sequence, multimodal, real-time, and online-learning research remains planned/locked, and Aggressive Research remains locked. See `PROJECT_STATE.md` for the authoritative status.
+Lots 0 through 8 now provide foundations, universe/CI alignment, historical data, deterministic simulation, shared Feature Engine 1.1, four quantitative research baselines, the offline Balanced Risk Engine, two-axis rule-based regime classification, governed tabular ML scoring, deterministic multi-strategy portfolio construction, and a local read-only Dashboard/observability foundation. The next planned stages are Lot 8.1 — Validation Gate & Transaction Cost Economics; Lot 9 — Broker / Paper Trading; Lot 10 — Balanced Paper Validation; and Lot 11 — Limited Live. Neural, sequence, multimodal, real-time, and online-learning research remains PLANNED / LOCKED, and Aggressive Research remains LOCKED. See `PROJECT_STATE.md` for the authoritative status.

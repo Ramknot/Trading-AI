@@ -11,8 +11,11 @@
 - Lot 5 — Regime Detector + Mean Reversion + Strategy Activation: DONE
 - Lot 6 — ML Platform Foundation & Statistical Scoring: DONE
 - Lot 7 — Multi-Strategy Portfolio Engine: DONE
-- Lot 8 — Dashboard: TODO
+- Lot 8 — Dashboard & Observability: DONE
+- Lot 8.1 — Validation Gate & Transaction Cost Economics: TODO
 - Lot 9 — Broker / Paper Trading: TODO
+- Lot 10 — Balanced Paper Validation: TODO
+- Lot 11 — Limited Live: TODO
 
 ## Future branch: Aggressive Research
 
@@ -53,3 +56,7 @@ Delivered: framework-neutral `ModelAdapter`, `ModelTrainer`, `ModelRegistry`, an
 ## Lot 7 delivery summary
 
 Delivered: `BalancedPortfolioEngine` 1.0 with profile/Risk-bounded TOML configuration and SHA-256 provenance; fixed 15% Trend, Momentum, Breakout, and Mean Reversion sleeves; complete UTC opportunity batching, deterministic intra-strategy ranking, soft exact-timestamp correlation/group diversification, same-symbol aggregation, sleeve attribution, target netting, five-position/15%-symbol/60%-exposure construction caps, no-trade band, entry-turnover deferral, pending-order conflict handling, and current-close sizing; fail-closed point-in-time currency contracts with configuration-driven asset metadata; shared multi-strategy Backtester integration across ML modes, activation policy, mandatory Balanced Risk, and next-bar execution; full signal-to-fill portfolio lineage, schema 1.5 tamper-evident exports, backward inspection through schema 1.4, Portfolio CLI diagnostics, neutral mono-versus-multi research reporting, deterministic smoke runs, and offline architecture/safety tests. No broker, optimizer, neural network, streaming, online learning, leverage, or Aggressive path was added. Future ML Evolution remains PLANNED / LOCKED and Aggressive Research remains LOCKED.
+
+## Lot 8 delivery summary
+
+Delivered: immutable UTC monitoring events/snapshots, health and decision-trace contracts; checksum-verified `BacktestMonitoringSource` with schemas 1.0–1.5 and fingerprinted Parquet cache; a local SQLite event/snapshot store; deterministic read models for Overview, Equity/Drawdown, Portfolio, Strategies, Regimes, ML, Risk, Data Quality, Costs, System Health, decision history, and complete order lineage; a responsive FastAPI/Jinja2/vanilla-JS Dashboard and versioned JSON API restricted to loopback hosts and read-only HTTP routes; defensive metadata escaping/redaction and path-traversal/integrity refusal; explicit `KNOWN`/`ESTIMATED`/`UNAVAILABLE` trading and operating cost coverage with no unknown-to-zero conversion; Dashboard/Monitoring CLI diagnostics; and offline API/UI/store/security/backward-compatibility tests. No broker, order transmission, remote exposure, cloud service, market stream, strategy mutation, Risk bypass, or `LIVE` control was added. Lot 8.1 is reserved for the real Transaction Cost Engine and economic validation gate. Future ML Evolution remains PLANNED / LOCKED and Aggressive Research remains LOCKED.

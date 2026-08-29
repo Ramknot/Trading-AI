@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trading AI · Observability</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}">
+</head>
+<body data-selected-run="{{ selected_run_id }}">
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">TRADING AI · LOCAL OBSERVABILITY</p>
+      <h1>Balanced Research Console</h1>
+    </div>
+    <div class="read-only" aria-label="Dashboard access mode">READ ONLY · LOCAL</div>
+  </header>
+
+  <main>
+    <section class="run-picker" aria-labelledby="run-picker-title">
+      <div>
+        <p class="eyebrow" id="run-picker-title">VERIFIED BACKTEST SOURCE</p>
+        <label for="run-select">Run</label>
+        <select id="run-select">
+          <option value="">Select a local run</option>
+          {% for run in runs %}
+          <option value="{{ run.run_id }}" {% if selected_run_id == run.run_id %}selected{% endif %}>
+            {{ run.run_id }} · {{ run.schema_version }} · {{ run.integrity }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="source-state">
+        <span class="status-dot" id="source-dot"></span>
+        <span id="source-message">Waiting for a verified run</span>
+      </div>
+    </section>
+
+    <nav class="section-nav" aria-label="Dashboard sections">
+      <a href="#overview">Overview</a><a href="#equity">Equity</a>
+      <a href="#portfolio">Portfolio</a><a href="#strategies">Strategies</a>
+      <a href="#regimes">Regimes</a><a href="#ml">ML</a>
+      <a href="#risk">Risk</a><a href="#data-quality">Data Quality</a>
+      <a href="#costs">Costs</a><a href="#health">Health</a>
+      <a href="#decisions">Decision Trace</a>
+    </nav>
+
+    <section id="overview" class="panel">
+      <div class="panel-heading"><div><p class="eyebrow">SYSTEM / MODE / CAPITAL</p><h2>Overview</h2></div><span id="last-refresh">Static source</span></div>
+      <div id="overview-cards" class="metric-grid empty-state">Select a run to load verified observations.</div>
+    </section>
+
+    <section id="equity" class="panel split-panel">
+      <div><p class="eyebrow">PERFORMANCE OBSERVATION</p><h2>Equity & Drawdown</h2><div id="equity-chart" class="chart-placeholder">UNAVAILABLE</div></div>
+      <div id="equity-metrics" class="detail-list"></div>
+    </section>
+
+    <section id="portfolio" class="panel">
+      <p class="eyebrow">PHYSICAL POSITIONS / TARGETS / SLEEVES</p><h2>Portfolio</h2>
+      <div class="three-column"><div><h3>Positions</h3><div id="positions"></div></div><div><h3>Targets</h3><div id="targets"></div></div><div><h3>Sleeve contributions</h3><div id="sleeves"></div></div></div>
+      <div id="portfolio-summary" class="detail-list"></div>
+    </section>
+
+    <section id="strategies" class="panel">
+      <p class="eyebrow">EXPLAINABLE CANDIDATES</p><h2>Strategies</h2><div id="strategy-grid" class="card-grid"></div>
+    </section>
+
+    <section id="regimes" class="panel">
+      <p class="eyebrow">STRUCTURE + VOLATILITY</p><h2>Regimes</h2><div id="regime-table"></div>
+    </section>
+
+    <section id="ml" class="panel split-panel">
+      <div><p class="eyebrow">STATISTICAL SCORING, NOT CERTAINTY</p><h2>ML</h2><div id="ml-summary" class="detail-list"></div></div>
+      <div><h3>Recent predictions</h3><div id="ml-predictions"></div></div>
+    </section>
+
+    <section id="risk" class="panel">
+      <p class="eyebrow">FINAL SIMULATED AUTHORITY</p><h2>Risk</h2><div id="risk-summary" class="metric-grid"></div><div id="risk-reasons"></div>
+    </section>
+
+    <section id="data-quality" class="panel">
+      <p class="eyebrow">PROVENANCE / INTEGRITY / WARNINGS</p><h2>Data Quality</h2><div id="data-table"></div>
+    </section>
+
+    <section id="costs" class="panel">
+      <p class="eyebrow">KNOWN ≠ COMPLETE</p><h2>Costs</h2>
+      <div id="cost-coverage" class="coverage-banner"></div>
+      <div class="two-column"><div><h3>Trading costs</h3><div id="trading-costs"></div></div><div><h3>Operating costs</h3><div id="operating-costs"></div></div></div>
+      <div id="pnl-costs" class="metric-grid"></div>
+    </section>
+
+    <section id="health" class="panel">
+      <p class="eyebrow">COMPONENT AVAILABILITY</p><h2>System Health</h2><div id="health-grid" class="card-grid"></div>
+    </section>
+
+    <section id="decisions" class="panel">
+      <p class="eyebrow">DATASET → FEATURE → REGIME → STRATEGY → ML → PORTFOLIO → RISK → FILL</p><h2>Decision Trace</h2>
+      <div class="filters">
+        <label>Component <input id="filter-component" autocomplete="off"></label>
+        <label>Symbol <input id="filter-symbol" autocomplete="off"></label>
+        <label>Strategy <input id="filter-strategy" autocomplete="off"></label>
+        <label>Status <input id="filter-status" autocomplete="off"></label>
+        <label>Reason <input id="filter-reason" autocomplete="off"></label>
+      </div>
+      <label for="trace-select">Order lineage</label><select id="trace-select"><option value="">First available trace</option></select>
+      <div id="trace-timeline" class="trace-timeline"></div>
+      <h3>Decision history</h3><div id="decision-table"></div>
+    </section>
+  </main>
+
+  <footer>Local research observability. Missing values remain UNAVAILABLE. No trading controls are exposed.</footer>
+  <script src="{{ url_for('static', path='/dashboard.js') }}" defer></script>
+</body>
+</html>

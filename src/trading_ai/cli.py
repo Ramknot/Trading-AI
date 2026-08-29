@@ -60,6 +60,7 @@ from trading_ai.ml import (
     TrainingPipeline,
 )
 from trading_ai.ml.exceptions import MLError
+from trading_ai.monitoring.exceptions import MonitoringError
 from trading_ai.portfolio import (
     BalancedPortfolioEngine,
     inspect_portfolio_config,
@@ -445,6 +446,36 @@ def build_parser() -> argparse.ArgumentParser:
         "--profile", default=os.getenv("TRADING_AI_PROFILE", "balanced")
     )
     portfolio_inspect.add_argument("--json", action="store_true", dest="as_json")
+
+    dashboard_parser = commands.add_parser(
+        "dashboard", help="serve or inspect the local read-only observability UI"
+    )
+    dashboard_commands = dashboard_parser.add_subparsers(
+        dest="dashboard_command", required=True
+    )
+    dashboard_serve = dashboard_commands.add_parser(
+        "serve", help="serve the local-only Dashboard"
+    )
+    dashboard_serve.add_argument("--host", default="127.0.0.1")
+    dashboard_serve.add_argument("--port", type=int, default=8080)
+    dashboard_serve.add_argument("--data-root", type=Path, default=Path("data_local"))
+    dashboard_inspect = dashboard_commands.add_parser(
+        "inspect", help="verify and inspect one run through monitoring view models"
+    )
+    dashboard_inspect.add_argument("--run-id", required=True)
+    _add_store_arguments(dashboard_inspect)
+
+    monitoring_parser = commands.add_parser(
+        "monitoring", help="inspect local observability health"
+    )
+    monitoring_commands = monitoring_parser.add_subparsers(
+        dest="monitoring_command", required=True
+    )
+    monitoring_health = monitoring_commands.add_parser(
+        "health", help="inspect the local monitoring source and store"
+    )
+    monitoring_health.add_argument("--run-id")
+    _add_store_arguments(monitoring_health)
     return parser
 
 
@@ -880,6 +911,37 @@ def _run_regime(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_dashboard(args: argparse.Namespace) -> int:
+    from trading_ai.monitoring.dashboard import (
+        build_monitoring_service,
+        serve_dashboard,
+    )
+
+    if args.dashboard_command == "serve":
+        serve_dashboard(data_root=args.data_root, host=args.host, port=args.port)
+        return 0
+    if args.dashboard_command == "inspect":
+        payload = build_monitoring_service(args.data_root).inspect(args.run_id)
+        print(_render_payload(payload, args.as_json))
+        return 0
+    raise AssertionError(f"unhandled dashboard command: {args.dashboard_command}")
+
+
+def _run_monitoring(args: argparse.Namespace) -> int:
+    from trading_ai.monitoring.dashboard import build_monitoring_service
+
+    if args.monitoring_command != "health":
+        raise AssertionError(f"unhandled monitoring command: {args.monitoring_command}")
+    service = build_monitoring_service(args.data_root)
+    payload = (
+        service.section(args.run_id, "health")
+        if args.run_id is not None
+        else service.health_without_run()
+    )
+    print(_render_payload(payload, args.as_json))
+    return 0
+
+
 def _run_ml(args: argparse.Namespace) -> int:
     registry = LocalModelRegistry(args.data_root / "ml")
     if args.ml_command == "evaluate":
@@ -1267,7 +1329,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_ml(args)
         if args.command == "portfolio":
             return _run_portfolio(args)
-    except (BacktestError, DataError, RegimeError, MLError, TradingAIError, ValueError) as exc:
+        if args.command == "dashboard":
+            return _run_dashboard(args)
+        if args.command == "monitoring":
+            return _run_monitoring(args)
+    except (
+        BacktestError,
+        DataError,
+        RegimeError,
+        MLError,
+        MonitoringError,
+        TradingAIError,
+        ValueError,
+    ) as exc:
         if getattr(args, "as_json", False):
             print(json.dumps({"status": "ERROR", "error": str(exc)}))
         else:

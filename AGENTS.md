@@ -92,4 +92,12 @@ These rules apply to Codex and every future development agent working in this re
 - Portfolio modules must not contact brokers, concrete data providers, or network clients.
 - Portfolio construction must not hide Markowitz, Kelly, risk-parity, performance-chasing, or ML allocation optimization.
 - A `PortfolioPlan` is a proposal, not execution permission, and must never bypass Risk.
+- Dashboard and Monitoring code must never execute trades, mutate trading engines, or unlock `LIVE`.
+- The UI must consume observability/API contracts instead of recomputing Strategy, ML, Portfolio, or Risk logic.
+- Unknown monitoring values must remain `UNAVAILABLE`; an absent component must not be reported as healthy.
+- Missing transaction costs must never be silently treated as zero.
+- Backtest integrity must be verified before decision data is displayed as trusted.
+- Remote or public Dashboard exposure requires future authentication and is not allowed by default.
+- Monitoring contracts must remain reusable for future Paper/Live sessions without importing brokers into the Dashboard.
+- Trading-cost assumptions belong to a dedicated cost configuration/engine, never to UI code.
 - Update `PROJECT_STATE.md` when a lot changes state.
