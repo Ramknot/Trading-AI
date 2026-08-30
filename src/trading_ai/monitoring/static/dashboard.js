@@ -201,8 +201,25 @@ function renderCosts(data) {
     gross_pnl: data.gross_pnl, known_trading_costs: data.known_trading_costs,
     estimated_trading_costs: data.estimated_trading_costs,
     operating_costs_known: data.known_operating_costs,
+    net_before_operating: data.net_trading_pnl_before_operating,
+    operating_costs_total: data.operating_costs_total,
+    net_economic_pnl: data.net_economic_pnl,
     net_pnl_known: data.net_pnl_known, net_pnl_estimated: data.net_pnl_estimated,
+    tariff_profile: data.tariff_profile_id, tariff_status: data.tariff_status,
   });
+}
+
+function renderValidation(data) {
+  renderMetrics(byId("validation-summary"), {
+    status: data.status, campaign: data.real_data_campaign_status,
+    final_oos: data.final_oos, tariff_profile: data.tariff_profile_id,
+    tariff_status: data.tariff_status, cost_coverage: data.cost_coverage,
+    survivorship_warning: data.survivorship_bias_warning,
+  });
+  renderTable(byId("validation-criteria"), data.criteria || [], [
+    ["Criterion", "name"], ["Status", "status", "badge"],
+    ["Observed", "observed"], ["Required", "required"], ["Reason", "reason"],
+  ]);
 }
 
 function renderHealth(data) {
@@ -251,17 +268,17 @@ async function loadRun(runId) {
   if (!runId) return;
   try {
     const params = `run_id=${encodeURIComponent(runId)}`;
-    const [overview, equity, portfolio, strategies, regimes, ml, risk, dataQuality, costs, health, snapshot] = await Promise.all([
+    const [overview, equity, portfolio, strategies, regimes, ml, risk, dataQuality, costs, validation, health, snapshot] = await Promise.all([
       fetchJson(`/api/v1/overview?${params}`), fetchJson(`/api/v1/equity?${params}`),
       fetchJson(`/api/v1/portfolio?${params}`), fetchJson(`/api/v1/strategies?${params}`),
       fetchJson(`/api/v1/regimes?${params}`), fetchJson(`/api/v1/ml?${params}`),
       fetchJson(`/api/v1/risk?${params}`), fetchJson(`/api/v1/data-quality?${params}`),
-      fetchJson(`/api/v1/costs?${params}`), fetchJson(`/api/v1/health?${params}`),
+      fetchJson(`/api/v1/costs?${params}`), fetchJson(`/api/v1/validation?${params}`), fetchJson(`/api/v1/health?${params}`),
       fetchJson(`/api/v1/snapshot?${params}`),
     ]);
     renderOverview(overview); renderChart(equity); renderDetails(byId("equity-metrics"), equity.metrics || {});
     renderPortfolio(portfolio); renderStrategies(strategies); renderRegimes(regimes); renderMl(ml);
-    renderRisk(risk); renderData(dataQuality); renderCosts(costs); renderHealth(health);
+    renderRisk(risk); renderData(dataQuality); renderCosts(costs); renderValidation(validation); renderHealth(health);
     const traceSelect = byId("trace-select");
     const traces = snapshot.decision_traces || [];
     traceSelect.replaceChildren();

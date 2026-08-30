@@ -1,6 +1,6 @@
 # Trading AI
 
-Trading AI is a safety-first, modular Python project for reproducible market research, paper trading, and future controlled execution. Lot 8 adds a local read-only Dashboard and an observability boundary over the foundations, data, backtesting, feature, regime, ML, portfolio, and risk layers delivered in Lots 0 through 7. It makes verified backtest state, provenance, decisions, health, and cost coverage understandable without moving business logic into the UI. Portfolio construction still proposes targets; `BalancedRiskEngine` remains the final authority on every simulated order.
+Trading AI is a safety-first, modular Python project for reproducible market research, paper trading, and future controlled execution. Lot 8.1 adds configuration-driven transaction economics, point-in-time cash reservations, an Economic Gate, and a research Validation Gate to the local read-only Dashboard and the engines delivered in Lots 0 through 8. It distinguishes modeled gross performance from cost-aware net performance without moving business logic into the UI. Portfolio construction still proposes targets; `BalancedRiskEngine` remains the final authority on every simulated order, and no validation result can unlock Paper or `LIVE` execution.
 
 ## Safety guarantees
 
@@ -19,6 +19,8 @@ These are architectural safeguards, not a claim that trading systems or market d
 config/profiles/                  configurable profiles and market universes
 config/regimes/                   Balanced detector/policy TOML; Aggressive locked
 config/portfolio/                 Balanced sleeves/caps/currencies; Aggressive locked
+config/costs/                     dated tariffs, tax/instrument metadata, operating costs
+config/validation/                fixed research-validation thresholds
 src/trading_ai/core/              models, configuration, safety policy, health, logging
 src/trading_ai/data/
   base.py                         provider-neutral DataProvider contract
@@ -28,13 +30,16 @@ src/trading_ai/data/
   resampling.py                   deterministic session-anchored 1h -> 4h aggregation
   storage.py                      Parquet datasets, manifests, and SHA-256 integrity
   providers/fake.py               deterministic offline test provider
+  providers/local.py              explicit mapped CSV/Parquet ingestion, no network
   providers/yahoo.py              development historical-data adapter
 src/trading_ai/features/          shared trend, momentum, volatility, volume, structure features
 src/trading_ai/regimes/           two-axis detector, confirmation, policy, reporting
 src/trading_ai/strategies/        configs, sizing, registry, and four research baselines
 src/trading_ai/ml/                training/inference contracts, tabular adapters, registry, scoring
 src/trading_ai/portfolio/         deterministic sleeves, allocation, netting, FX contracts
+src/trading_ai/costs/             estimates, actual costs, reconciliation, economics
 src/trading_ai/risk/              mandatory gate, Balanced limits/state/guards/reporting
+src/trading_ai/validation/        immutable OOS/economic research validation reports
 src/trading_ai/execution/         sealed risk-gated ExecutionEngine
 src/trading_ai/brokers/           BrokerAdapter contract
 src/trading_ai/monitoring/        immutable events/snapshots, SQLite, API, local Dashboard
@@ -70,6 +75,8 @@ DataEngine -> validated BacktestDataset -> BacktestEngine
                                            |-> MLScorer (optional PASS/BLOCK entry filter)
                                            |-> StrategyActivationPolicy (<= 1.0)
                                            |-> BalancedPortfolioEngine (targets/proposals)
+                                           |-> TransactionCostEngine (point-in-time estimate)
+                                           |-> EconomicGate (entry eligibility only)
                                            |-> BalancedRiskEngine (explicit)
                                            |-> ExecutionModel (risk-approved orders only)
                                            |-> PortfolioLedger
@@ -159,8 +166,8 @@ Every result records these assumptions through immutable `BacktestConfig` and da
 
 - A signal produced after processing bar `t` cannot fill on that bar. A `MARKET` order first becomes eligible on the next later bar for the same symbol/timeframe and fills completely at that bar's open before costs.
 - A `BUY LIMIT` or `SELL LIMIT` stays `PENDING` until a later bar reaches it, or until an optional eligible-bar expiry. V1 applies a deterministic full fill at the limit, not a favorable intrabar price. When spread/slippage are non-zero, the raw touch must be sufficient for the submitted limit to remain the all-in execution-price bound.
-- Spread and slippage are configurable in basis points and applied adversely to buys and sells inside `BarExecutionModel`. Commission supports a fixed amount, percentage basis points, and an optional minimum. Zero-cost reference runs remain possible. Costs are always recorded on fills and in metrics.
-- Balanced V1 is cash-only and long-only. `BalancedRiskEngine` first reduces or rejects a request that exceeds available cash, position/portfolio/group limits, or an available exit quantity; the ledger independently rejects any remaining inconsistency. Cash cannot become negative. There is no margin, leverage, shorting, market depth, realistic partial fill, latency, market impact, or order-book model.
+- Spread and slippage remain configurable in basis points and are applied adversely inside `BarExecutionModel`. In cost-aware runs, `BalancedTransactionCostEngine` represents those same price impacts economically and receives their realized fill amounts; it never debits them a second time. Broker commission, exchange/pass-through fees, transaction tax, FX cost, financing, and other variable costs come only from dated configuration. A missing critical component remains `UNAVAILABLE`, making coverage incomplete rather than silently becoming zero. Legacy zero-cost assumptions remain available only to old/test paths; production-research CLI runs require an explicit cost profile and reject non-zero legacy commission flags.
+- Balanced V1 is cash-only and long-only. A BUY reserves point-in-time notional plus estimated entry costs and a configured buffer before Risk evaluation; concurrent pending orders cannot reuse that cash. `BalancedRiskEngine` first reduces or rejects a request that exceeds free cash after costs, position/portfolio/group limits, or an available exit quantity; the ledger independently rejects any remaining inconsistency. The buffer is released rather than reported as a realized cost. Cash cannot become negative. There is no margin, leverage, shorting, market depth, realistic partial fill, latency, market impact, or order-book model.
 - `STOP` and `STOP_LIMIT` enum values are reserved for future execution models but are rejected by the Lot 2 order-intent model. V1 accepts only `MARKET` and `LIMIT`.
 - Raw OHLC is used with explicit dividends and splits. `adjusted_close` is never substituted. A held long position receives an explicit dividend ledger credit; a split changes quantity and average entry price without economic PnL. Adjusted-only inputs are rejected so price adjustment and actions cannot be counted twice.
 - Gaps are never filled or forward-filled. `DataQualityReport.FAIL` always blocks a run. `WARNING` blocks under the default `STRICT` policy and may continue, with warnings preserved in the result, only under `ALLOW_WARNINGS`.
@@ -206,10 +213,15 @@ data_local/backtests/<run_id>/
   portfolio_decisions.parquet
   portfolio_targets.parquet
   portfolio_sleeves.parquet
+  cost_estimates.parquet
+  economic_decisions.parquet
+  cost_actuals.parquet
+  cost_reconciliation.parquet
+  validation_report.json
   checksums.json
 ```
 
-`BacktestResultStore` verifies each exported file against its SHA-256 checksum before inspection. No result or market dataset is versioned.
+Schema `1.6` adds the cost/economic/validation files while `BacktestResultStore` remains checksum-compatible with schemas `1.0` through `1.5`. It verifies every exported file against its SHA-256 checksum before inspection. No result or market dataset is versioned.
 
 ### Lot 2 limitations
 
@@ -471,7 +483,7 @@ Trading AI engines
       -> responsive read-only web Dashboard
 ```
 
-`BacktestMonitoringSource` accepts only safe run IDs below `data_local/backtests/`, invokes the existing checksum verifier before every trusted read, and supports export schemas `1.0` through `1.5`. A changed or corrupt file is rejected as untrusted. Missing sections in older runs remain `UNAVAILABLE`; they are never synthesized as healthy observations. Parsed Parquet tables are cached in memory by checksum-manifest fingerprint, while integrity is still rechecked before reuse. The source contract is separate from `EventMonitoringSource`, which reserves the same event boundary for a future authenticated Paper/Live session without implementing one now.
+`BacktestMonitoringSource` accepts only safe run IDs below `data_local/backtests/`, invokes the existing checksum verifier before every trusted read, and supports export schemas `1.0` through `1.6`. A changed or corrupt file is rejected as untrusted. Missing sections in older runs remain `UNAVAILABLE`; they are never synthesized as healthy observations. Parsed Parquet tables are cached in memory by checksum-manifest fingerprint, while integrity is still rechecked before reuse. The source contract is separate from `EventMonitoringSource`, which reserves the same event boundary for a future authenticated Paper/Live session without implementing one now.
 
 Important engine facts are normalized into stable UTC event types covering data quality, features, regimes, signals, ML predictions/decisions, activation, portfolio/risk decisions, order intents, fills, positions, equity, health, and costs. Events retain the run/session, component/version, related IDs, and provenance. `SQLiteMonitoringStore` provides a local standard-library event/snapshot store below the Git-ignored `data_local/monitoring/` tree; there is no cloud database, Redis, Kafka, or monitoring SaaS.
 
@@ -481,7 +493,8 @@ The single responsive interface includes Overview, Equity/Drawdown, Portfolio, S
 
 ```text
 Dataset -> Feature -> Regime -> Strategy -> Signal -> ML
-        -> Activation -> Portfolio -> Risk -> Order -> Fill
+        -> Activation -> Portfolio -> Cost Estimate -> Economic Gate
+        -> Risk -> Order -> Fill -> Actual Cost -> Reconciliation
 ```
 
 The frontend reads `/api/v1` JSON endpoints for runs, snapshots, overview, equity, portfolio, strategies, regimes, ML, risk, data quality, costs, decisions, events, traces, and health. It never opens Parquet files itself. Polling every five seconds is suitable for local monitoring and preserves a future event-driven source boundary; completed backtests remain static. Values are rendered with DOM `textContent`, templates auto-escape input, and no external CDN is required.
@@ -504,13 +517,55 @@ Decision and risk views expose machine-readable reason codes, human explanations
 
 ### Cost coverage and gross/net display
 
-`TradingCostBreakdown` keeps commission, spread, slippage, exchange fees, transaction tax, FX cost, financing cost, other variable cost, and total variable cost separate. `OperatingCostBreakdown` separately reserves market-data, server/VPS, software/subscription, and other fixed costs. Every component is `KNOWN`, `ESTIMATED`, or `UNAVAILABLE`; an unavailable component cannot carry a numeric zero.
+`TradingCostBreakdown` keeps commission, spread, slippage, exchange fees, transaction tax, FX cost, financing cost, other variable cost, and total variable cost separate. `OperatingCostBreakdown` separately reserves market-data, server/VPS, software/subscription, and other fixed costs. Every component is `KNOWN`, `ESTIMATED`, `NOT_APPLICABLE`, or `UNAVAILABLE`; an unavailable component cannot carry a numeric zero.
 
-For current backtests, the Dashboard reuses the existing commission, spread, and slippage metrics as `KNOWN`. It does not recalculate those costs. Exchange fees, taxes, FX, financing, other variable costs, and operating costs remain `UNAVAILABLE` unless a future trusted source explicitly supplies them, so coverage is `INCOMPLETE`. `gross_pnl` and `net_pnl_known` describe the modeled backtest economics; `net_pnl_estimated` remains unavailable while critical categories are missing. Cash reservations/free cash also remain unavailable when the export does not contain them. The UI never labels this incomplete view as a complete real-world net result.
-
-Lot 8.1 will implement the configuration-driven `TransactionCostEngine` and economic validation gate for broker commissions, exchange fees, taxes, FX, spread, slippage, financing, round-trip costs, fee-aware cash reservation, and net-edge analysis. Lot 8 contains no hard-coded IBKR tariff, tax rate, or market-data subscription price.
+Schema 1.6 Dashboard views reuse the immutable estimates, actual costs, reconciliation, and validation report produced by the engines. They show entry and round-trip estimates, commission, spread, slippage, exchange/pass-through fees, transaction tax, FX, financing, other variable costs, operating costs, gross P&L, net trading P&L before operating costs, and net economic P&L only when coverage permits it. `NET COMPLETE` and `NET INCOMPLETE` are explicit. Older exports retain the Lot 8 compatibility behavior: unmodeled categories remain `UNAVAILABLE`. The UI never recalculates tariffs, taxes, expected edge, or validation criteria.
 
 Portfolio construction can diversify exposure but cannot eliminate market risk or guarantee profitability. Monitoring improves visibility; it does not validate profitability or make a backtest predictive.
+
+## Transaction Cost Economics & Research Validation
+
+### Cost engine, provenance, and coverage
+
+`BalancedTransactionCostEngine` (`balanced-transaction-cost / 1.0`) is an offline, broker-neutral adapter boundary. It consumes dated TOML tariff, tax, instrument, FX, and operating-cost metadata; it never contacts a broker or provider. The repository contains source-provenanced current reference profiles for IBKR Pro Fixed and Tiered US stock/ETF pricing, verified on 2026-08-29 against the official [Interactive Brokers stock commission schedule](https://www.interactivebrokers.com/en/pricing/commissions-stocks.php) and [pricing overview](https://www.interactivebrokers.com/en/pricing/commissions-home.php). Tiered and fixed commission formulas support per-share, proportional, minimum, maximum, notional-cap, marginal monthly-volume tiers, and explicit exchange/pass-through fields. Fixed US pricing marks bundled exchange costs `NOT_APPLICABLE`; Tiered retains aggregate exchange/pass-through coverage as `UNAVAILABLE` because the currently configured NSCC/DTC amount is only one known component of venue-dependent total fees. These configurations are research assumptions, not runtime scraping and not a promise that an account will receive those prices.
+
+Every variable component is independently `KNOWN`, `ESTIMATED`, `NOT_APPLICABLE`, or `UNAVAILABLE`. Commission is distinct from exchange/pass-through fees so the same fee cannot be counted twice. Taxes require explicit, dated instrument eligibility metadata and a dated rule; a ticker suffix alone is never enough. The configured 2026 French transaction-tax rate is sourced from [CGI article 235 ter ZD on Légifrance](https://www.legifrance.gouv.fr/codes/section_lc/LEGITEXT000006069577/LEGISCTA000006162552/2026-01-01), while eligibility for `MC.PA` and `AIR.PA` deliberately remains `UNVERIFIED` pending validation against the official dated annual instrument list. Financing is explicitly `NOT_APPLICABLE` for cash-only Balanced simulation. Market-data, VPS/server, and software costs are period-level operating costs and are never allocated arbitrarily to fills.
+
+The configured tariff `effective_from`, optional `effective_to`, `verified_at`, source URL, lifecycle status, version, and SHA-256 are retained in every estimate. Applying a current tariff to older history produces `CURRENT_TARIFF_APPLIED_RETROSPECTIVELY`, an `ESTIMATED` component, and `tariff_period_covered = false`; strict validation cannot pass it as historically verified. No IBKR rate, tax rate, or subscription amount is hard-coded in Python.
+
+### Estimates, actual costs, FX, and cash safety
+
+At close `t`, `PreTradeCostEstimate` uses only the observed symbol, side, proposed quantity, current known price, timeframe, configured spread/slippage, dated tariff/tax metadata, and point-in-time FX book. It never uses the next open or a future fill. Entry costs and estimated round-trip costs are separate. If an exit leg cannot be estimated, round-trip coverage is incomplete instead of guessed.
+
+For a BUY, `EstimatedCashRequirement` is:
+
+```text
+base-currency notional + estimated entry costs + configured cash buffer
+```
+
+The default buffer is the greater of 5 bps and USD 0.50. It reserves capacity but is not a realized fee. Pending orders reserve the same full requirement, and `BalancedRiskEngine` may reduce or reject quantity before simulated execution. Risk remains sovereign after both Cost Engine and Economic Gate. Risk-reducing exits are never blocked by Economic Gate, and the Risk Engine continues to permit valid reductions while new risk is halted.
+
+Currency conversion and FX cost are different facts. Same-currency conversion is identity; no implicit USD/EUR rate exists. A mixed-currency entry without a point-in-time conversion rate and explicit cost treatment stays incomplete and fails closed. `FixedFxRateBook` exists only in tests; future real FX series must enter through validated Data Engine contracts. The current physical ledger is not presented as production multi-currency accounting.
+
+After a simulated fill, `ActualTradingCost` recomputes notional-sensitive modeled costs from the realized fill and retains the execution model's realized spread/slippage attribution. The ledger debits commission, exchange fees, transaction tax, FX fees, financing, and other explicit cash fees; spread/slippage are already embedded in execution price and are not debited twice. `CostReconciliation` records estimate-versus-actual differences per component without rewriting the immutable decision made at `t`.
+
+### Expected edge and Economic Gate
+
+`EconomicGate` (`balanced-economic-gate / 1.0`) applies only to new risk. It compares an independently provenanced `ExpectedEdgeEstimate` with estimated round-trip variable cost. ML probability is never converted into expected return. The optional `HistoricalEdgeEstimator` accepts only observations strictly before the decision from explicit `TRAIN` or `VALIDATION` regions; it refuses final `TEST` observations and returns `UNAVAILABLE` below its minimum sample size.
+
+With a valid edge, the gate calculates expected net edge and edge-to-cost ratio against fixed, non-optimized thresholds. It returns `PASS`, `BLOCK`, `INCOMPLETE`, or `NOT_APPLICABLE`. Missing edge defaults to `INCOMPLETE_ALLOW_RESEARCH`: the run may continue for instrumentation, but it cannot be presented as economically validated. Incomplete critical cost coverage blocks new risk. `EXIT_LONG` always receives `NOT_APPLICABLE` pass-through. Economic eligibility cannot authorize execution or override `BalancedRiskEngine`.
+
+### Validation Gate and real-data campaign
+
+`ResearchValidationGate` (`balanced-research-validation / 1.0`) emits an immutable, checksum-protected report. Its fixed predeclared criteria include dataset integrity and DataQuality, final out-of-sample status, no overlap with ML/edge calibration, complete variable-cost coverage, tariff verification for the tested period, at least 30 closed trades, positive net return and expectancy, profit factor above 1, drawdown within the 10% Balanced hard limit, coherent circuit-breaker states, and non-negative cash. Missing operating costs prevent complete deployment economics. Cost stress is reported at 1.0x, 1.25x, 1.5x, and 2.0x; chronological subperiod and symbol concentration reports expose fragility without automatically selecting a winner.
+
+Statuses are `PASS`, `WARNING`, `FAIL`, and `BLOCKED_EXTERNAL_DATA`. `PASS` means only that the configured research checks were satisfied; it never means safe, profitable, approved for Paper, or approved for `LIVE`. A synthetic fixture cannot be relabeled as real data through the CLI. Every report retains `SURVIVORSHIP_BIAS_NOT_RESOLVED`, because the current universe is not historical point-in-time membership. Final TEST data must never tune strategy, ML, regimes, portfolio, Risk, expected-edge thresholds, buffers, tariffs, or cost assumptions.
+
+Yahoo remains a replaceable research adapter. TLS certificate validation is mandatory; `verify=False` is forbidden. When a host requires additional trusted corporate roots, a CA bundle may be assembled from `certifi` plus roots already trusted by the operating system, without disabling verification. `LocalHistoricalFileProvider` is an explicit mapped CSV/Parquet fallback for real files supplied by the user; it rejects absolute/path-traversal mappings and still routes data through UTC normalization, validation, manifests, and SHA-256 storage.
+
+The controlled Lot 8.1 campaign used checksum-verified Yahoo daily data for all 13 configured Balanced symbols from 2020-01-01 through 2025-01-01. TLS verification remained enabled, every dataset passed integrity and DataQuality checks, and the backtest retained raw-price/corporate-action provenance. The research Validation Gate returned `FAIL`, not a fabricated financial approval: 16 trades closed versus the predeclared minimum of 30, max drawdown was 11.23% versus the 10% Balanced limit, and the current IBKR reference tariff is not historically verified for that period. Operating costs are also unavailable, results were concentrated in one symbol, and `SURVIVORSHIP_BIAS_NOT_RESOLVED` remains explicit. The stress table stayed positive through 2x modeled variable costs, but this does not override any failed criterion or establish future profitability.
+
+Transaction costs reduce measured performance and cash capacity; their estimates can still differ from real execution. Validation gates reduce research error; they do not eliminate market risk or guarantee profitability.
 
 ## CLI
 
@@ -522,6 +577,9 @@ trading-ai doctor --environment PAPER --profile balanced --json
 trading-ai risk inspect --profile balanced --json
 trading-ai regime policy --profile balanced --json
 trading-ai portfolio inspect --profile balanced --json
+trading-ai costs inspect --profile balanced --cost-profile ibkr_pro_fixed --json
+trading-ai costs verify-config --profile balanced --cost-profile ibkr_pro_tiered --json
+trading-ai costs estimate --profile balanced --symbol AAPL --side BUY --quantity 10 --price 100 --timeframe 1d --timestamp 2026-08-29T16:00:00Z --spread-bps 5 --slippage-bps 2 --json
 ```
 
 `risk inspect` validates and displays engine/version, limits, drawdown/daily-loss rules, volatility/correlation policies, concentration groups, and the deterministic config hash. Inspecting `aggressive` reports it as locked and disabled; it does not activate it.
@@ -551,20 +609,29 @@ Date-only CLI values are UTC day boundaries. Datetime values must carry `Z` or a
 Backtests never download missing data. Each requested symbol, timeframe, start, and end must exactly match an existing Lot 1 cache manifest. The technical demo remains available, and Lot 3 baselines can be selected from the shared registry:
 
 ```powershell
-trading-ai backtest run --strategy buy-and-hold --symbol SPY --timeframe 1d --start 2024-01-01 --end 2025-01-01 --starting-cash 100000 --spread-bps 5 --slippage-bps 5 --commission-fixed 1 --json
-trading-ai backtest run --strategy trend --symbol SPY --timeframe 1d --start 2024-01-01 --end 2025-01-01 --spread-bps 5 --slippage-bps 5 --commission-fixed 1 --json
-trading-ai backtest run --strategy momentum --symbol SPY --symbol QQQ --symbol IWM --timeframe 1d --start 2024-01-01 --end 2025-01-01 --top-k 2 --rebalance-every 5 --spread-bps 5 --slippage-bps 5 --commission-fixed 1 --json
-trading-ai backtest run --strategy breakout --symbol AAPL --timeframe 4h --start 2024-06-01 --end 2024-07-01 --entry-window 20 --exit-window 10 --spread-bps 5 --slippage-bps 5 --commission-fixed 1 --json
-trading-ai backtest run --strategy mean-reversion --symbol SPY --timeframe 1d --start 2024-01-01 --end 2025-01-01 --mean-reversion-lookback 20 --entry-zscore -1.5 --exit-zscore -0.25 --spread-bps 5 --slippage-bps 5 --commission-fixed 1 --json
+trading-ai backtest run --strategy buy-and-hold --symbol SPY --timeframe 1d --start 2024-01-01 --end 2025-01-01 --starting-cash 100000 --spread-bps 5 --slippage-bps 5 --cost-profile ibkr_pro_fixed --json
+trading-ai backtest run --strategy trend --symbol SPY --timeframe 1d --start 2024-01-01 --end 2025-01-01 --spread-bps 5 --slippage-bps 5 --cost-profile ibkr_pro_fixed --json
+trading-ai backtest run --strategy momentum --symbol SPY --symbol QQQ --symbol IWM --timeframe 1d --start 2024-01-01 --end 2025-01-01 --top-k 2 --rebalance-every 5 --spread-bps 5 --slippage-bps 5 --cost-profile ibkr_pro_tiered --json
+trading-ai backtest run --strategy breakout --symbol AAPL --timeframe 4h --start 2024-06-01 --end 2024-07-01 --entry-window 20 --exit-window 10 --spread-bps 5 --slippage-bps 5 --cost-profile ibkr_pro_fixed --json
+trading-ai backtest run --strategy mean-reversion --symbol SPY --timeframe 1d --start 2024-01-01 --end 2025-01-01 --mean-reversion-lookback 20 --entry-zscore -1.5 --exit-zscore -0.25 --spread-bps 5 --slippage-bps 5 --cost-profile ibkr_pro_fixed --json
 trading-ai backtest run --strategy trend --symbol SPY --timeframe 1d --start 2024-01-01 --end 2025-01-01 --ml-mode score-only --ml-model-id ml-example-id --json
 trading-ai backtest run --strategy trend --symbol SPY --timeframe 1d --start 2024-01-01 --end 2025-01-01 --ml-mode filter --ml-model-id ml-approved-id --ml-threshold 0.55 --json
-trading-ai backtest run --strategy trend --strategy momentum --strategy breakout --strategy mean-reversion --symbol SPY --symbol QQQ --symbol AAPL --timeframe 1d --start 2024-01-01 --end 2025-01-01 --spread-bps 5 --slippage-bps 5 --commission-fixed 1 --json
+trading-ai backtest run --strategy trend --strategy momentum --strategy breakout --strategy mean-reversion --symbol SPY --symbol QQQ --symbol AAPL --timeframe 1d --start 2024-01-01 --end 2025-01-01 --spread-bps 5 --slippage-bps 5 --cost-profile ibkr_pro_fixed --json
 trading-ai backtest run --strategy trend --strategy momentum --symbol SPY --symbol QQQ --timeframe 1d --start 2024-01-01 --end 2025-01-01 --ml-mode filter --ml-model-id trend=ml-trend-approved --ml-model-id momentum=ml-momentum-approved --json
 trading-ai backtest inspect --run-id bt-0123456789abcdef01234567 --json
 trading-ai strategy list --json
 ```
 
-The demo submits one buy intent. Every quantitative baseline CLI run explicitly injects `BalancedRegimeDetector`, `BalancedStrategyActivationPolicy`, and `BalancedRiskEngine`; there is no CLI flag to bypass regime eligibility or risk. Repeating `--strategy` creates one shared multi-strategy run and explicitly injects `BalancedPortfolioEngine`; it does not launch independent backtests. ML is `disabled` by default. Active scoring always requires an explicit model ID; in a multi-strategy run each model is mapped as `strategy=model-id`. `FILTER` additionally requires `APPROVED`, and there is no latest-model fallback. A missing/invalid configuration fails closed. Every command uses the first selected symbol as its configurable Buy & Hold benchmark unless `--benchmark-symbol` names another cached profile symbol. Strategy-specific window/allocation flags override immutable defaults for that run, and the resolved values are stored in `BacktestResult`. `run` exports under `data_local/backtests/`; `inspect` verifies checksums and includes ML, regime/policy, portfolio, and risk summaries. A cache miss fails clearly without falling back to Yahoo Finance.
+The demo submits one buy intent. Every CLI run explicitly injects the selected `BalancedTransactionCostEngine`, `EconomicGate`, and `BalancedRiskEngine`; quantitative baselines also inject `BalancedRegimeDetector` and `BalancedStrategyActivationPolicy`. There is no CLI flag to bypass economics, regime eligibility, or Risk. Non-zero legacy `--commission-*` flags are rejected so commission cannot be charged twice. Repeating `--strategy` creates one shared multi-strategy run and explicitly injects `BalancedPortfolioEngine`; it does not launch independent backtests. ML is `disabled` by default. Active scoring always requires an explicit model ID; in a multi-strategy run each model is mapped as `strategy=model-id`. `FILTER` additionally requires `APPROVED`, and there is no latest-model fallback. A missing/invalid configuration fails closed. Every command uses the first selected symbol as its configurable Buy & Hold benchmark unless `--benchmark-symbol` names another cached profile symbol. Strategy-specific window/allocation flags override immutable defaults for that run, and the resolved values are stored in `BacktestResult`. `run` exports under `data_local/backtests/`; `inspect` verifies checksums and includes ML, regime/policy, portfolio, cost, economic, validation, and risk summaries. A cache miss fails clearly without falling back to Yahoo Finance.
+
+Validation is always explicit and offline:
+
+```powershell
+trading-ai validation run --run-id bt-0123456789abcdef01234567 --final-oos-confirmed --no-training-edge-overlap-confirmed --real-data --json
+trading-ai validation inspect --validation-id validation-0123456789abcdef01234567 --json
+```
+
+`--real-data` is checked against dataset provider provenance and cannot convert an in-memory/synthetic export into a real campaign. A missing flag or unavailable external dataset yields `BLOCKED_EXTERNAL_DATA`; a historical run using a current tariff outside its effective dates fails the strict tariff criterion. Reports are stored below `data_local/validation/`, never activate a profile, and never authorize Paper or `LIVE`.
 
 ML training and lifecycle commands also use exact local cache entries only:
 
@@ -582,7 +649,7 @@ Training replays the selected quant baseline without ML to build candidate examp
 
 ## Tests and CI
 
-The default suite is deterministic, fast, and independent of Yahoo Finance and the network. It uses `FakeDataProvider` plus synthetic sessions, invalid bars, gaps, corporate actions, feature/regime warm-ups, future-append invariance, exact-timestamp relative strength, all four baselines, two-axis classification, confirmation/transitions, activation matrices, Mean Reversion eligibility/exits/no-averaging, monotonic ML/policy/portfolio/risk sizing, chronological labels/splits/purge/embargo, all three tabular adapters, registry integrity/lifecycle, inference modes, multi-strategy batching/netting/diversification/turnover/FX, current-close sizing, shared-ledger Risk integration, backward-compatible tamper-evident exports, immutable monitoring events, SQLite round trips, all Dashboard API/UI sections, schemas 1.0–1.5, path traversal/corruption refusal, explicit cost incompleteness, full decision traces, local-only serving, and architecture audits. Synthetic patterns validate mechanics only; they are not evidence of market edge or profitability.
+The default suite is deterministic, fast, and independent of Yahoo Finance and the network. It uses `FakeDataProvider` plus synthetic sessions, invalid bars, gaps, corporate actions, feature/regime warm-ups, future-append invariance, exact-timestamp relative strength, all four baselines, two-axis classification, confirmation/transitions, activation matrices, Mean Reversion eligibility/exits/no-averaging, monotonic ML/policy/portfolio/risk sizing, chronological labels/splits/purge/embargo, all three tabular adapters, registry integrity/lifecycle, inference modes, multi-strategy batching/netting/diversification/turnover/FX, current-close sizing, fee-aware pending reservations, fixed/tiered/proportional/capped commissions, dated tax/FX/operating-cost states, Economic Gate behavior, OOS/stress/robustness validation, shared-ledger Risk integration, backward-compatible tamper-evident exports, immutable monitoring events, SQLite round trips, all Dashboard API/UI sections, schemas 1.0–1.6, path traversal/corruption refusal, full cost/decision lineage, local-only serving, and architecture audits. Synthetic patterns validate mechanics only; they are not evidence of market edge or profitability.
 
 ```powershell
 .\.venv\Scripts\python -m compileall -q src
@@ -613,4 +680,4 @@ Expected safety matrix:
 
 ## Roadmap
 
-Lots 0 through 8 now provide foundations, universe/CI alignment, historical data, deterministic simulation, shared Feature Engine 1.1, four quantitative research baselines, the offline Balanced Risk Engine, two-axis rule-based regime classification, governed tabular ML scoring, deterministic multi-strategy portfolio construction, and a local read-only Dashboard/observability foundation. The next planned stages are Lot 8.1 — Validation Gate & Transaction Cost Economics; Lot 9 — Broker / Paper Trading; Lot 10 — Balanced Paper Validation; and Lot 11 — Limited Live. Neural, sequence, multimodal, real-time, and online-learning research remains PLANNED / LOCKED, and Aggressive Research remains LOCKED. See `PROJECT_STATE.md` for the authoritative status.
+Lots 0 through 8.1 now provide foundations, universe/CI alignment, historical data, deterministic simulation, shared Feature Engine 1.1, four quantitative research baselines, the offline Balanced Risk Engine, two-axis rule-based regime classification, governed tabular ML scoring, deterministic multi-strategy portfolio construction, a local read-only Dashboard/observability boundary, and configuration-driven transaction economics plus a research Validation Gate. The next planned stages are Lot 9 — Broker / Paper Trading; Lot 10 — Balanced Paper Validation; and Lot 11 — Limited Live. Neural, sequence, multimodal, real-time, and online-learning research remains PLANNED / LOCKED, and Aggressive Research remains LOCKED. See `PROJECT_STATE.md` for the authoritative status and the separate real-data campaign outcome.

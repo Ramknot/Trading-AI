@@ -38,6 +38,16 @@ if TYPE_CHECKING:
         RebalancePlan,
         StrategySleeveState,
     )
+    from trading_ai.costs.models import (
+        ActualTradingCost,
+        CostReconciliation,
+        CostSummary,
+        EconomicDecision,
+        OperatingCostBreakdown,
+        PreTradeCostEstimate,
+    )
+    from trading_ai.validation.models import ValidationReport
+    from trading_ai.data.models import DataQualityReport
 
 
 class ExecutionEnvironment(str, Enum):
@@ -191,6 +201,10 @@ class OrderRequest:
     expected_entry_price: Decimal | None = None
     invalidation_price: Decimal | None = None
     risk_distance: Decimal | None = None
+    cost_estimate_id: str | None = None
+    economic_decision_id: str | None = None
+    estimated_cash_requirement: Decimal | None = None
+    estimated_unit_cash_requirement: Decimal | None = None
 
     def __post_init__(self) -> None:
         _require_non_empty(self.order_id, "order_id")
@@ -231,6 +245,20 @@ class OrderRequest:
                 raise ValueError(f"{field_name} must be positive and finite")
         if self.invalidation_price is not None and self.risk_distance is not None:
             raise ValueError("provide invalidation_price or risk_distance, not both")
+        for field_name in ("cost_estimate_id", "economic_decision_id"):
+            value = getattr(self, field_name)
+            if value is not None:
+                _require_non_empty(value, field_name)
+        if (self.cost_estimate_id is None) != (self.economic_decision_id is None):
+            raise ValueError("cost and economic lineage must be recorded together")
+        if (self.estimated_cash_requirement is None) != (
+            self.estimated_unit_cash_requirement is None
+        ):
+            raise ValueError("cash requirement total and unit amount must be recorded together")
+        for field_name in ("estimated_cash_requirement", "estimated_unit_cash_requirement"):
+            value = getattr(self, field_name)
+            if value is not None and (not value.is_finite() or value <= Decimal("0")):
+                raise ValueError(f"{field_name} must be positive and finite")
 
 
 @dataclass(frozen=True, slots=True)
@@ -522,6 +550,20 @@ class BacktestResult:
     portfolio_targets: tuple[PortfolioTarget, ...] = ()
     portfolio_sleeves: tuple[StrategySleeveState, ...] = ()
     portfolio_metrics: PortfolioMetrics | None = None
+    cost_engine_name: str = "unavailable"
+    cost_engine_version: str = "0"
+    cost_config: tuple[tuple[str, str], ...] = ()
+    cost_config_hash: str = "0" * 64
+    tariff_profile_id: str | None = None
+    tariff_status: str | None = None
+    cost_estimates: tuple[PreTradeCostEstimate, ...] = ()
+    cost_actuals: tuple[ActualTradingCost, ...] = ()
+    economic_decisions: tuple[EconomicDecision, ...] = ()
+    cost_reconciliations: tuple[CostReconciliation, ...] = ()
+    operating_costs: OperatingCostBreakdown | None = None
+    cost_summary: CostSummary | None = None
+    validation_report: ValidationReport | None = None
+    data_quality_reports: tuple[DataQualityReport, ...] = ()
 
     def __post_init__(self) -> None:
         _require_non_empty(self.run_id, "run_id")
@@ -767,6 +809,48 @@ class BacktestResult:
             for opportunity_id in order.portfolio_opportunity_ids
         ):
             raise ValueError("orders must reference exported portfolio opportunities")
+        _require_non_empty(self.cost_engine_name, "cost_engine_name")
+        _require_non_empty(self.cost_engine_version, "cost_engine_version")
+        if tuple(sorted(self.cost_config)) != self.cost_config:
+            raise ValueError("cost_config must be deterministically sorted")
+        if len(self.cost_config_hash) != 64 or any(
+            character not in "0123456789abcdef"
+            for character in self.cost_config_hash.lower()
+        ):
+            raise ValueError("cost_config_hash must be a SHA-256 digest")
+        estimate_ids = [item.estimate_id for item in self.cost_estimates]
+        if len(estimate_ids) != len(set(estimate_ids)):
+            raise ValueError("cost estimate IDs must be unique")
+        actual_ids = [item.actual_cost_id for item in self.cost_actuals]
+        if len(actual_ids) != len(set(actual_ids)):
+            raise ValueError("actual cost IDs must be unique")
+        economic_ids = [item.decision_id for item in self.economic_decisions]
+        if len(economic_ids) != len(set(economic_ids)):
+            raise ValueError("economic decision IDs must be unique")
+        if any(item.cost_estimate_id not in set(estimate_ids) for item in self.economic_decisions):
+            raise ValueError("economic decisions must reference exported cost estimates")
+        if any(item.estimate_id not in set(estimate_ids) for item in self.cost_actuals):
+            raise ValueError("actual costs must reference exported estimates")
+        if any(item.actual_cost_id not in set(actual_ids) for item in self.cost_reconciliations):
+            raise ValueError("cost reconciliations must reference exported actual costs")
+        if self.cost_estimates:
+            known_economic = set(economic_ids)
+            if any(
+                order.cost_estimate_id is not None
+                and order.cost_estimate_id not in set(estimate_ids)
+                for order in self.orders
+            ):
+                raise ValueError("orders must reference exported cost estimates")
+            if any(
+                order.economic_decision_id is not None
+                and order.economic_decision_id not in known_economic
+                for order in self.orders
+            ):
+                raise ValueError("orders must reference exported economic decisions")
+        if self.data_quality_reports and len(self.data_quality_reports) != len(
+            self.dataset_references
+        ):
+            raise ValueError("data quality reports must align with dataset references")
 
     @property
     def finished_at(self) -> datetime:

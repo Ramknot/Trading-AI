@@ -433,7 +433,7 @@ def test_regime_exports_are_parquet_hashed_and_reported(tmp_path, paper_context)
     assert parquet.read_table(directory / "regime_snapshots.parquet").num_rows == 3
     assert parquet.read_table(directory / "regime_transitions.parquet").num_rows == 1
     assert parquet.read_table(directory / "activation_decisions.parquet").num_rows == 1
-    assert summary["schema_version"] == "1.5"
+    assert summary["schema_version"] == "1.6"
     assert summary["regime"]["detector_name"] == "scripted-test-regime"
     assert summary["regime"]["policy_name"] == "balanced-strategy-policy"
     assert summary["regime"]["report"]["activation_reduce"] == 1

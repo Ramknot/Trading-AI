@@ -170,6 +170,16 @@ class MetricsEngine:
         ]
         exposure = statistics.mean(exposure_values) if exposure_values else 0.0
         net_values = [trade.net_pnl for trade in trades]
+        total_exchange_fees = sum((fill.exchange_fees for fill in fills), ZERO)
+        total_transaction_tax = sum((fill.transaction_tax for fill in fills), ZERO)
+        total_fx_cost = sum((fill.fx_cost for fill in fills), ZERO)
+        total_financing_cost = sum((fill.financing_cost for fill in fills), ZERO)
+        total_other_variable_cost = sum(
+            (fill.other_variable_cost for fill in fills), ZERO
+        )
+        total_commission = sum((fill.commission for fill in fills), ZERO)
+        total_spread = sum((fill.spread_cost for fill in fills), ZERO)
+        total_slippage = sum((fill.slippage_cost for fill in fills), ZERO)
         return BacktestMetrics(
             initial_capital=initial_capital,
             final_equity=final_equity,
@@ -203,8 +213,18 @@ class MetricsEngine:
             ),
             gross_profit=gross_profit,
             gross_loss=gross_loss,
-            total_commission=sum((fill.commission for fill in fills), ZERO),
-            total_spread_cost=sum((fill.spread_cost for fill in fills), ZERO),
-            total_slippage_cost=sum((fill.slippage_cost for fill in fills), ZERO),
+            total_commission=total_commission,
+            total_spread_cost=total_spread,
+            total_slippage_cost=total_slippage,
             dividend_income=dividend_income,
+            total_exchange_fees=total_exchange_fees,
+            total_transaction_tax=total_transaction_tax,
+            total_fx_cost=total_fx_cost,
+            total_financing_cost=total_financing_cost,
+            total_other_variable_cost=total_other_variable_cost,
+            total_variable_cost=(
+                total_commission + total_spread + total_slippage
+                + total_exchange_fees + total_transaction_tax + total_fx_cost
+                + total_financing_cost + total_other_variable_cost
+            ),
         )

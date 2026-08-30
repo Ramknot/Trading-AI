@@ -1,0 +1,25 @@
+profile_id = "ibkr_pro_fixed"
+provider = "Interactive Brokers"
+plan = "IBKR Pro Fixed — US Stocks/ETFs"
+currency = "USD"
+markets = ["US"]
+effective_from = 2026-08-29T00:00:00Z
+source_name = "Interactive Brokers — Commissions Stocks"
+source_reference = "https://www.interactivebrokers.com/en/pricing/commissions-stocks.php"
+verified_at = 2026-08-29T00:00:00Z
+status = "VERIFIED"
+version = "2026-08-29"
+
+[commission]
+fixed_per_order = "0"
+per_unit = "0.005"
+proportional_bps = "0"
+minimum_per_order = "1.00"
+maximum_notional_fraction = "0.01"
+
+[exchange_fees]
+status = "NOT_APPLICABLE"
+included_in_commission = true
+per_unit = "0"
+proportional_bps = "0"
+source_reference = "https://www.interactivebrokers.com/en/pricing/commissions-home.php"

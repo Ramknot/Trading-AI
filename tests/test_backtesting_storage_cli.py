@@ -32,6 +32,19 @@ PORTFOLIO_COUNTS = (
     "portfolio_targets",
     "portfolio_sleeves",
 )
+COST_FILES = (
+    "cost_estimates.parquet",
+    "cost_actuals.parquet",
+    "economic_decisions.parquet",
+    "cost_reconciliation.parquet",
+    "validation_report.json",
+)
+COST_COUNTS = (
+    "cost_estimates",
+    "cost_actuals",
+    "economic_decisions",
+    "cost_reconciliations",
+)
 
 
 def _result(paper_context):
@@ -72,7 +85,8 @@ def test_result_export_writes_json_parquet_and_verifiable_hashes(
     assert parquet.read_table(directory / "ml_predictions.parquet").num_rows == 0
     assert parquet.read_table(directory / "ml_decisions.parquet").num_rows == 0
     assert all(parquet.read_table(directory / name).num_rows == 0 for name in PORTFOLIO_FILES)
-    assert summary["schema_version"] == "1.5"
+    assert all((directory / name).is_file() for name in COST_FILES)
+    assert summary["schema_version"] == "1.6"
     assert summary["risk"]["engine_name"] == "permissive-test-risk"
 
 
@@ -105,6 +119,7 @@ def test_result_store_keeps_lot2_schema_1_0_exports_inspectable(
         "ml_predictions.parquet",
         "ml_decisions.parquet",
         *PORTFOLIO_FILES,
+        *COST_FILES,
     ):
         (directory / name).unlink()
     summary_path = directory / "summary.json"
@@ -120,10 +135,14 @@ def test_result_store_keeps_lot2_schema_1_0_exports_inspectable(
     summary["counts"].pop("ml_decisions")
     for name in PORTFOLIO_COUNTS:
         summary["counts"].pop(name)
+    for name in COST_COUNTS:
+        summary["counts"].pop(name)
     summary.pop("risk")
     summary.pop("regime")
     summary.pop("ml")
     summary.pop("portfolio")
+    summary.pop("costs")
+    summary.pop("validation")
     summary_path.write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -139,6 +158,7 @@ def test_result_store_keeps_lot2_schema_1_0_exports_inspectable(
         "ml_predictions.parquet",
         "ml_decisions.parquet",
         *PORTFOLIO_FILES,
+        *COST_FILES,
     ):
         checksums["files"].pop(name)
     checksums["files"]["summary.json"] = hashlib.sha256(
@@ -172,6 +192,7 @@ def test_result_store_keeps_lot3_schema_1_1_exports_inspectable(
         "ml_predictions.parquet",
         "ml_decisions.parquet",
         *PORTFOLIO_FILES,
+        *COST_FILES,
     ):
         (directory / name).unlink()
     summary_path = directory / "summary.json"
@@ -186,10 +207,14 @@ def test_result_store_keeps_lot3_schema_1_1_exports_inspectable(
     summary["counts"].pop("ml_decisions")
     for name in PORTFOLIO_COUNTS:
         summary["counts"].pop(name)
+    for name in COST_COUNTS:
+        summary["counts"].pop(name)
     summary.pop("risk")
     summary.pop("regime")
     summary.pop("ml")
     summary.pop("portfolio")
+    summary.pop("costs")
+    summary.pop("validation")
     summary_path.write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -204,6 +229,7 @@ def test_result_store_keeps_lot3_schema_1_1_exports_inspectable(
         "ml_predictions.parquet",
         "ml_decisions.parquet",
         *PORTFOLIO_FILES,
+        *COST_FILES,
     ):
         checksums["files"].pop(name)
     checksums["files"]["summary.json"] = hashlib.sha256(
@@ -235,6 +261,7 @@ def test_result_store_keeps_lot4_schema_1_2_exports_inspectable(
         "ml_predictions.parquet",
         "ml_decisions.parquet",
         *PORTFOLIO_FILES,
+        *COST_FILES,
     )
     for name in regime_files:
         (directory / name).unlink()
@@ -248,9 +275,13 @@ def test_result_store_keeps_lot4_schema_1_2_exports_inspectable(
     summary["counts"].pop("ml_decisions")
     for name in PORTFOLIO_COUNTS:
         summary["counts"].pop(name)
+    for name in COST_COUNTS:
+        summary["counts"].pop(name)
     summary.pop("regime")
     summary.pop("ml")
     summary.pop("portfolio")
+    summary.pop("costs")
+    summary.pop("validation")
     summary_path.write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -279,7 +310,10 @@ def test_result_store_keeps_lot5_schema_1_3_exports_inspectable(
     result = _result(paper_context)
     store = BacktestResultStore(tmp_path / "backtests")
     directory = store.export(result)
-    ml_files = ("ml_predictions.parquet", "ml_decisions.parquet", *PORTFOLIO_FILES)
+    ml_files = (
+        "ml_predictions.parquet", "ml_decisions.parquet",
+        *PORTFOLIO_FILES, *COST_FILES,
+    )
     for name in ml_files:
         (directory / name).unlink()
     summary_path = directory / "summary.json"
@@ -289,8 +323,12 @@ def test_result_store_keeps_lot5_schema_1_3_exports_inspectable(
     summary["counts"].pop("ml_decisions")
     for name in PORTFOLIO_COUNTS:
         summary["counts"].pop(name)
+    for name in COST_COUNTS:
+        summary["counts"].pop(name)
     summary.pop("ml")
     summary.pop("portfolio")
+    summary.pop("costs")
+    summary.pop("validation")
     summary_path.write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -318,20 +356,24 @@ def test_result_store_keeps_lot6_schema_1_4_exports_inspectable(
     result = _result(paper_context)
     store = BacktestResultStore(tmp_path / "backtests")
     directory = store.export(result)
-    for name in PORTFOLIO_FILES:
+    for name in (*PORTFOLIO_FILES, *COST_FILES):
         (directory / name).unlink()
     summary_path = directory / "summary.json"
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     summary["schema_version"] = "1.4"
     for name in PORTFOLIO_COUNTS:
         summary["counts"].pop(name)
+    for name in COST_COUNTS:
+        summary["counts"].pop(name)
     summary.pop("portfolio")
+    summary.pop("costs")
+    summary.pop("validation")
     summary_path.write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     checksums_path = directory / "checksums.json"
     checksums = json.loads(checksums_path.read_text(encoding="utf-8"))
-    for name in PORTFOLIO_FILES:
+    for name in (*PORTFOLIO_FILES, *COST_FILES):
         checksums["files"].pop(name)
     checksums["files"]["summary.json"] = hashlib.sha256(
         summary_path.read_bytes()
@@ -344,6 +386,46 @@ def test_result_store_keeps_lot6_schema_1_4_exports_inspectable(
     assert inspected["schema_version"] == "1.4"
     assert inspected["ml"]["mode"] == "DISABLED"
     assert inspected["portfolio"]["status"] == "unavailable / legacy sizing"
+
+
+def test_result_store_keeps_lot7_schema_1_5_exports_inspectable(
+    tmp_path, paper_context
+) -> None:
+    result = _result(paper_context)
+    store = BacktestResultStore(tmp_path / "backtests")
+    directory = store.export(result)
+    for name in COST_FILES:
+        (directory / name).unlink()
+    summary_path = directory / "summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["schema_version"] = "1.5"
+    for name in COST_COUNTS:
+        summary["counts"].pop(name)
+    summary.pop("costs")
+    summary.pop("validation")
+    summary_path.write_text(
+        json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    checksums_path = directory / "checksums.json"
+    checksums = json.loads(checksums_path.read_text(encoding="utf-8"))
+    for name in COST_FILES:
+        checksums["files"].pop(name)
+    checksums["files"]["summary.json"] = hashlib.sha256(
+        summary_path.read_bytes()
+    ).hexdigest()
+    checksums_path.write_text(
+        json.dumps(checksums, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+    inspected = store.inspect(result.run_id)
+
+    assert inspected["schema_version"] == "1.5"
+    assert "portfolio" in inspected
+    assert inspected["costs"] == {
+        "status": "UNAVAILABLE",
+        "coverage": "INCOMPLETE",
+    }
+    assert inspected["validation"] == {"status": "UNAVAILABLE"}
 
 
 def test_cached_dataset_adapter_preserves_manifest_and_action_provenance(

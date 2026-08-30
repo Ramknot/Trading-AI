@@ -378,6 +378,8 @@ class BacktestOrder:
     portfolio_decision_id: str | None = None
     portfolio_opportunity_ids: tuple[str, ...] = ()
     risk_decision_id: str | None = None
+    cost_estimate_id: str | None = None
+    economic_decision_id: str | None = None
     status: OrderStatus = OrderStatus.PENDING
     limit_price: Decimal | None = None
     status_reason: str | None = None
@@ -405,6 +407,12 @@ class BacktestOrder:
             raise ValueError("portfolio plan and decision lineage must be recorded together")
         if self.risk_decision_id is not None:
             _require_text(self.risk_decision_id, "risk_decision_id")
+        for field_name in ("cost_estimate_id", "economic_decision_id"):
+            value = getattr(self, field_name)
+            if value is not None:
+                _require_text(value, field_name)
+        if (self.cost_estimate_id is None) != (self.economic_decision_id is None):
+            raise ValueError("cost estimate and economic decision lineage must be recorded together")
         if self.completed_at is not None:
             _require_aware(self.completed_at, "completed_at")
         if self.quantity <= ZERO:
@@ -440,6 +448,16 @@ class Fill:
     commission: Decimal
     slippage_cost: Decimal
     spread_cost: Decimal
+    exchange_fees: Decimal = ZERO
+    transaction_tax: Decimal = ZERO
+    fx_cost: Decimal = ZERO
+    financing_cost: Decimal = ZERO
+    other_variable_cost: Decimal = ZERO
+    total_variable_cost: Decimal | None = None
+    cost_estimate_id: str | None = None
+    economic_decision_id: str | None = None
+    actual_cost_id: str | None = None
+    unavailable_cost_components: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         for field_name in ("fill_id", "order_id", "symbol"):
@@ -449,9 +467,33 @@ class Fill:
             raise ValueError("fill quantity must be positive")
         if self.reference_price <= ZERO or self.price <= ZERO:
             raise ValueError("fill prices must be positive")
-        for field_name in ("commission", "slippage_cost", "spread_cost"):
+        for field_name in (
+            "commission", "slippage_cost", "spread_cost", "exchange_fees",
+            "transaction_tax", "fx_cost", "financing_cost", "other_variable_cost",
+        ):
             if getattr(self, field_name) < ZERO:
                 raise ValueError(f"{field_name} must not be negative")
+        if self.total_variable_cost is not None and self.total_variable_cost < ZERO:
+            raise ValueError("total_variable_cost must not be negative")
+        for field_name in ("cost_estimate_id", "economic_decision_id", "actual_cost_id"):
+            value = getattr(self, field_name)
+            if value is not None:
+                _require_text(value, field_name)
+        if tuple(sorted(set(self.unavailable_cost_components))) != self.unavailable_cost_components:
+            raise ValueError("unavailable_cost_components must be sorted and unique")
+
+    @property
+    def cash_fees_excluding_price_impact(self) -> Decimal:
+        """Fees debited separately; spread/slippage are already embedded in price."""
+
+        return (
+            self.commission
+            + self.exchange_fees
+            + self.transaction_tax
+            + self.fx_cost
+            + self.financing_cost
+            + self.other_variable_cost
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -515,6 +557,11 @@ class Trade:
     net_pnl: Decimal
     return_pct: Decimal
     holding_period_seconds: float
+    exchange_fees: Decimal = ZERO
+    transaction_tax: Decimal = ZERO
+    fx_cost: Decimal = ZERO
+    financing_cost: Decimal = ZERO
+    other_variable_cost: Decimal = ZERO
 
     def __post_init__(self) -> None:
         _require_text(self.trade_id, "trade_id")
@@ -559,6 +606,12 @@ class BacktestMetrics:
     total_spread_cost: Decimal
     total_slippage_cost: Decimal
     dividend_income: Decimal
+    total_exchange_fees: Decimal = ZERO
+    total_transaction_tax: Decimal = ZERO
+    total_fx_cost: Decimal = ZERO
+    total_financing_cost: Decimal = ZERO
+    total_other_variable_cost: Decimal = ZERO
+    total_variable_cost: Decimal = ZERO
 
 
 @dataclass(frozen=True, slots=True)

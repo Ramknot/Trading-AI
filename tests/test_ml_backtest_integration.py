@@ -415,7 +415,7 @@ def test_ml_exports_are_hashed_and_backward_summary_is_readable(tmp_path, paper_
     summary = store.inspect(result.run_id)
     checksums = json.loads((directory / "checksums.json").read_text(encoding="utf-8"))
 
-    assert summary["schema_version"] == "1.5"
+    assert summary["schema_version"] == "1.6"
     assert summary["ml"]["mode"] == "FILTER"
     assert parquet.read_table(directory / "ml_predictions.parquet").num_rows == 1
     assert parquet.read_table(directory / "ml_decisions.parquet").num_rows == 1

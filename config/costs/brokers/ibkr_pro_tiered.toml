@@ -1,0 +1,48 @@
+profile_id = "ibkr_pro_tiered"
+provider = "Interactive Brokers"
+plan = "IBKR Pro Tiered — US Stocks/ETFs"
+currency = "USD"
+markets = ["US"]
+effective_from = 2026-08-29T00:00:00Z
+source_name = "Interactive Brokers — Commissions Stocks"
+source_reference = "https://www.interactivebrokers.com/en/pricing/commissions-stocks.php"
+verified_at = 2026-08-29T00:00:00Z
+status = "VERIFIED"
+version = "2026-08-29"
+
+[commission]
+fixed_per_order = "0"
+per_unit = "0"
+proportional_bps = "0"
+minimum_per_order = "0.35"
+maximum_notional_fraction = "0.01"
+
+[[commission.tiers]]
+up_to_monthly_quantity = "300000"
+per_unit = "0.0035"
+
+[[commission.tiers]]
+up_to_monthly_quantity = "3000000"
+per_unit = "0.0020"
+
+[[commission.tiers]]
+up_to_monthly_quantity = "20000000"
+per_unit = "0.0015"
+
+[[commission.tiers]]
+up_to_monthly_quantity = "100000000"
+per_unit = "0.0010"
+
+[[commission.tiers]]
+per_unit = "0.0005"
+
+[exchange_fees]
+# NSCC/DTC is published, but venue/regulatory/pass-through totals vary by fill.
+# Because this profile does not yet model every applicable component, aggregate
+# exchange/pass-through coverage remains UNAVAILABLE rather than treating a
+# known partial fee as a complete estimate.
+status = "UNAVAILABLE"
+included_in_commission = false
+per_unit = "0.00020"
+proportional_bps = "0"
+source_reference = "https://www.interactivebrokers.com/en/pricing/commissions-stocks.php"

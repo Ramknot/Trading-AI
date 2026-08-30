@@ -1,0 +1,105 @@
+[instruments.SPY]
+market = "US"
+venue = "SMART"
+currency = "USD"
+transaction_tax_applicable = false
+metadata_status = "VERIFIED"
+source_reference = "Balanced V1 instrument metadata"
+
+[instruments.QQQ]
+market = "US"
+venue = "SMART"
+currency = "USD"
+transaction_tax_applicable = false
+metadata_status = "VERIFIED"
+source_reference = "Balanced V1 instrument metadata"
+
+[instruments.IWM]
+market = "US"
+venue = "SMART"
+currency = "USD"
+transaction_tax_applicable = false
+metadata_status = "VERIFIED"
+source_reference = "Balanced V1 instrument metadata"
+
+[instruments.AAPL]
+market = "US"
+venue = "SMART"
+currency = "USD"
+transaction_tax_applicable = false
+metadata_status = "VERIFIED"
+source_reference = "Balanced V1 instrument metadata"
+
+[instruments.MSFT]
+market = "US"
+venue = "SMART"
+currency = "USD"
+transaction_tax_applicable = false
+metadata_status = "VERIFIED"
+source_reference = "Balanced V1 instrument metadata"
+
+[instruments.NVDA]
+market = "US"
+venue = "SMART"
+currency = "USD"
+transaction_tax_applicable = false
+metadata_status = "VERIFIED"
+source_reference = "Balanced V1 instrument metadata"
+
+[instruments.AMZN]
+market = "US"
+venue = "SMART"
+currency = "USD"
+transaction_tax_applicable = false
+metadata_status = "VERIFIED"
+source_reference = "Balanced V1 instrument metadata"
+
+[instruments.GOOGL]
+market = "US"
+venue = "SMART"
+currency = "USD"
+transaction_tax_applicable = false
+metadata_status = "VERIFIED"
+source_reference = "Balanced V1 instrument metadata"
+
+[instruments.META]
+market = "US"
+venue = "SMART"
+currency = "USD"
+transaction_tax_applicable = false
+metadata_status = "VERIFIED"
+source_reference = "Balanced V1 instrument metadata"
+
+[instruments.ASML]
+market = "US"
+venue = "SMART"
+currency = "USD"
+transaction_tax_applicable = false
+metadata_status = "VERIFIED"
+source_reference = "Balanced V1 instrument metadata"
+
+[instruments.SAP]
+market = "US"
+venue = "SMART"
+currency = "USD"
+transaction_tax_applicable = false
+metadata_status = "VERIFIED"
+source_reference = "Balanced V1 instrument metadata"
+
+[instruments."MC.PA"]
+market = "FR"
+venue = "XPAR"
+currency = "EUR"
+transaction_tax_applicable = true
+transaction_tax_rule_id = "france_ftt_2026"
+metadata_status = "UNVERIFIED"
+source_reference = "Eligibility must be revalidated against the dated official annual list"
+
+[instruments."AIR.PA"]
+market = "FR"
+venue = "XPAR"
+currency = "EUR"
+transaction_tax_applicable = true
+transaction_tax_rule_id = "france_ftt_2026"
+metadata_status = "UNVERIFIED"
+source_reference = "Eligibility must be revalidated against the dated official annual list"

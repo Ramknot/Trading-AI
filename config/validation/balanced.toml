@@ -1,0 +1,15 @@
+name = "balanced-research-validation"
+version = "1.0"
+enabled = true
+minimum_closed_trades = 30
+minimum_net_return = "0"
+minimum_net_expectancy = "0"
+minimum_profit_factor = "1.0"
+maximum_drawdown = "0.10"
+minimum_subperiods = 3
+symbol_concentration_warning_fraction = "0.75"
+cost_stress_multipliers = ["1.00", "1.25", "1.50", "2.00"]
+require_final_oos = true
+require_complete_variable_costs = true
+require_verified_tariff_for_period = true
+require_operating_costs_for_pass = true

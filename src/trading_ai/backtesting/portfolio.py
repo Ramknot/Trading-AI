@@ -27,6 +27,7 @@ class _PositionState:
     quantity: Decimal
     average_entry_price: Decimal
     entry_commission_remaining: Decimal
+    entry_other_fees_remaining: Decimal = ZERO
 
 
 class PortfolioLedger:
@@ -56,7 +57,7 @@ class PortfolioLedger:
 
     def validate_fill(self, fill: Fill) -> str | None:
         if fill.side is OrderSide.BUY:
-            required = fill.price * fill.quantity + fill.commission
+            required = fill.price * fill.quantity + fill.cash_fees_excluding_price_impact
             if required > self.cash:
                 return "insufficient cash; leverage is disabled"
             return None
@@ -71,11 +72,15 @@ class PortfolioLedger:
             raise BacktestExecutionError(rejection)
         state = self._positions.get(fill.symbol)
         if fill.side is OrderSide.BUY:
-            cost = fill.price * fill.quantity + fill.commission
+            separate_fees = fill.cash_fees_excluding_price_impact
+            cost = fill.price * fill.quantity + separate_fees
             self.cash -= cost
             if state is None:
                 self._positions[fill.symbol] = _PositionState(
-                    fill.quantity, fill.price, fill.commission
+                    fill.quantity,
+                    fill.price,
+                    fill.commission,
+                    separate_fees - fill.commission,
                 )
             else:
                 new_quantity = state.quantity + fill.quantity
@@ -85,22 +90,30 @@ class PortfolioLedger:
                 ) / new_quantity
                 state.quantity = new_quantity
                 state.entry_commission_remaining += fill.commission
+                state.entry_other_fees_remaining += separate_fees - fill.commission
             cash_change = -cost
             quantity_change = fill.quantity
         else:
             if state is None:
                 raise BacktestExecutionError("sell fill has no open position")
-            proceeds = fill.price * fill.quantity - fill.commission
+            separate_fees = fill.cash_fees_excluding_price_impact
+            proceeds = fill.price * fill.quantity - separate_fees
             self.cash += proceeds
             entry_commission = (
                 state.entry_commission_remaining
                 * fill.quantity
                 / state.quantity
             )
+            entry_other_fees = (
+                state.entry_other_fees_remaining
+                * fill.quantity
+                / state.quantity
+            )
             self.realized_pnl += (
                 fill.price - state.average_entry_price
-            ) * fill.quantity - entry_commission - fill.commission
+            ) * fill.quantity - entry_commission - entry_other_fees - separate_fees
             state.entry_commission_remaining -= entry_commission
+            state.entry_other_fees_remaining -= entry_other_fees
             state.quantity -= fill.quantity
             if state.quantity == ZERO:
                 del self._positions[fill.symbol]
@@ -187,7 +200,8 @@ class PortfolioLedger:
                         market_price - state.average_entry_price
                     )
                     * state.quantity
-                    - state.entry_commission_remaining,
+                    - state.entry_commission_remaining
+                    - state.entry_other_fees_remaining,
                 )
             )
         return tuple(views)

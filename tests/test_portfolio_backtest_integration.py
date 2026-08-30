@@ -362,7 +362,7 @@ def test_portfolio_export_1_5_is_hashed_and_contains_all_lineage_tables(
     directory = store.export(result)
     inspected = store.inspect(result.run_id)
 
-    assert inspected["schema_version"] == "1.5"
+    assert inspected["schema_version"] == "1.6"
     assert inspected["portfolio"]["engine_name"] == "balanced-portfolio"
     assert store.verify_integrity(result.run_id) is True
     for name, expected_rows in (

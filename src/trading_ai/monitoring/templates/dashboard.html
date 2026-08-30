@@ -40,13 +40,19 @@
       <a href="#portfolio">Portfolio</a><a href="#strategies">Strategies</a>
       <a href="#regimes">Regimes</a><a href="#ml">ML</a>
       <a href="#risk">Risk</a><a href="#data-quality">Data Quality</a>
-      <a href="#costs">Costs</a><a href="#health">Health</a>
+      <a href="#costs">Costs</a><a href="#validation">Validation</a><a href="#health">Health</a>
       <a href="#decisions">Decision Trace</a>
     </nav>
 
     <section id="overview" class="panel">
       <div class="panel-heading"><div><p class="eyebrow">SYSTEM / MODE / CAPITAL</p><h2>Overview</h2></div><span id="last-refresh">Static source</span></div>
       <div id="overview-cards" class="metric-grid empty-state">Select a run to load verified observations.</div>
+    </section>
+
+    <section id="validation" class="panel">
+      <p class="eyebrow">RESEARCH GATE · NEVER AN EXECUTION UNLOCK</p><h2>Validation</h2>
+      <div id="validation-summary" class="metric-grid"></div>
+      <div id="validation-criteria"></div>
     </section>
 
     <section id="equity" class="panel split-panel">
@@ -93,7 +99,7 @@
     </section>
 
     <section id="decisions" class="panel">
-      <p class="eyebrow">DATASET → FEATURE → REGIME → STRATEGY → ML → PORTFOLIO → RISK → FILL</p><h2>Decision Trace</h2>
+      <p class="eyebrow">DATASET → FEATURE → REGIME → STRATEGY → ML → PORTFOLIO → COSTS → ECONOMICS → RISK → FILL</p><h2>Decision Trace</h2>
       <div class="filters">
         <label>Component <input id="filter-component" autocomplete="off"></label>
         <label>Symbol <input id="filter-symbol" autocomplete="off"></label>

@@ -1,0 +1,30 @@
+name = "balanced"
+enabled = true
+engine_name = "balanced-transaction-cost"
+engine_version = "1.0"
+base_currency = "USD"
+tariff_profile = "ibkr_pro_fixed"
+tax_profile = "france_ftt"
+instrument_profile = "balanced"
+operating_profile = "balanced"
+
+cash_buffer_bps = 5
+cash_buffer_absolute = "0.50"
+fx_cost_bps = 2
+minimum_net_edge_bps = 5
+minimum_edge_to_cost_ratio = "1.25"
+missing_edge_policy = "INCOMPLETE_ALLOW_RESEARCH"
+allow_retrospective_tariff = true
+require_verified_tariff_for_validation = true
+
+# Research defaults only. They are not optimized and do not guarantee safety.
+critical_variable_components = [
+  "commission",
+  "spread",
+  "slippage",
+  "exchange_fees",
+  "transaction_tax",
+  "fx_cost",
+  "financing_cost",
+  "other_variable_cost",
+]

@@ -26,6 +26,15 @@ from trading_ai.backtesting.strategy import BuyAndHoldDemoStrategy
 from trading_ai.core.config import inspect_profile, load_runtime_settings
 from trading_ai.core.exceptions import TradingAIError
 from trading_ai.core.health import HealthReport, doctor
+from trading_ai.core.models import OrderSide
+from trading_ai.costs import (
+    BalancedTransactionCostEngine,
+    CostError,
+    EconomicGate,
+    inspect_cost_config,
+    load_balanced_cost_config,
+)
+from trading_ai.costs.models import PreTradeCostRequest
 from trading_ai.data.engine import DataEngine
 from trading_ai.data.exceptions import DataError
 from trading_ai.data.models import (
@@ -87,6 +96,11 @@ from trading_ai.strategies.config import (
     TrendConfig,
 )
 from trading_ai.strategies.registry import BASELINE_STRATEGIES
+from trading_ai.validation import (
+    LocalValidationStore,
+    ResearchValidationGate,
+    ValidationError,
+)
 
 
 def _parse_datetime(value: str) -> datetime:
@@ -265,6 +279,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument(
         "--commission-minimum", type=_parse_decimal, default=Decimal("0")
+    )
+    run_parser.add_argument(
+        "--cost-profile",
+        choices=("ibkr_pro_fixed", "ibkr_pro_tiered"),
+        default="ibkr_pro_fixed",
+        help="explicit dated transaction-cost tariff (default: ibkr_pro_fixed)",
     )
     run_parser.add_argument(
         "--benchmark-symbol",
@@ -446,6 +466,58 @@ def build_parser() -> argparse.ArgumentParser:
         "--profile", default=os.getenv("TRADING_AI_PROFILE", "balanced")
     )
     portfolio_inspect.add_argument("--json", action="store_true", dest="as_json")
+
+    costs_parser = commands.add_parser(
+        "costs", help="inspect and estimate configuration-driven transaction economics"
+    )
+    costs_commands = costs_parser.add_subparsers(dest="costs_command", required=True)
+    for name in ("inspect", "verify-config"):
+        item = costs_commands.add_parser(name, help=f"{name} one offline cost profile")
+        item.add_argument("--profile", default="balanced")
+        item.add_argument(
+            "--cost-profile",
+            choices=("ibkr_pro_fixed", "ibkr_pro_tiered"),
+            default="ibkr_pro_fixed",
+        )
+        item.add_argument("--json", action="store_true", dest="as_json")
+    costs_estimate = costs_commands.add_parser(
+        "estimate", help="estimate one point-in-time order without future prices"
+    )
+    costs_estimate.add_argument("--profile", default="balanced")
+    costs_estimate.add_argument("--cost-profile", choices=("ibkr_pro_fixed", "ibkr_pro_tiered"), default="ibkr_pro_fixed")
+    costs_estimate.add_argument("--symbol", required=True)
+    costs_estimate.add_argument("--side", choices=("BUY", "SELL"), required=True)
+    costs_estimate.add_argument("--quantity", type=_parse_decimal, required=True)
+    costs_estimate.add_argument("--price", type=_parse_decimal, required=True)
+    costs_estimate.add_argument("--timeframe", choices=("1h", "4h", "1d"), required=True)
+    costs_estimate.add_argument("--timestamp", type=_parse_datetime, required=True)
+    costs_estimate.add_argument("--spread-bps", type=_parse_decimal, default=Decimal("0"))
+    costs_estimate.add_argument("--slippage-bps", type=_parse_decimal, default=Decimal("0"))
+    costs_estimate.add_argument("--json", action="store_true", dest="as_json")
+
+    validation_parser = commands.add_parser(
+        "validation", help="run or inspect the offline research validation gate"
+    )
+    validation_commands = validation_parser.add_subparsers(
+        dest="validation_command", required=True
+    )
+    validation_run = validation_commands.add_parser(
+        "run", help="validate one checksum-verified schema 1.6 backtest export"
+    )
+    validation_run.add_argument("--run-id", required=True)
+    validation_run.add_argument("--final-oos-confirmed", action="store_true")
+    validation_run.add_argument(
+        "--no-training-edge-overlap-confirmed", action="store_true"
+    )
+    source_kind = validation_run.add_mutually_exclusive_group()
+    source_kind.add_argument("--real-data", action="store_true")
+    source_kind.add_argument("--synthetic-mechanics-only", action="store_true")
+    _add_store_arguments(validation_run)
+    validation_inspect = validation_commands.add_parser(
+        "inspect", help="inspect a stored immutable validation report"
+    )
+    validation_inspect.add_argument("--validation-id", required=True)
+    _add_store_arguments(validation_inspect)
 
     dashboard_parser = commands.add_parser(
         "dashboard", help="serve or inspect the local read-only observability UI"
@@ -780,6 +852,105 @@ def _run_portfolio(args: argparse.Namespace) -> int:
     }
     print(_render_payload(payload, args.as_json))
     return 0
+
+
+def _run_costs(args: argparse.Namespace) -> int:
+    profile = inspect_profile(args.profile)
+    if args.costs_command in {"inspect", "verify-config"}:
+        config = inspect_cost_config(
+            profile.name, tariff_profile=args.cost_profile
+        )
+        payload: dict[str, Any] = {
+            "profile": profile.name.value,
+            "profile_enabled": profile.enabled,
+            "enabled": config.enabled,
+            "engine": config.engine_name,
+            "version": config.engine_version,
+            "tariff_profile": config.tariff_profile,
+            "base_currency": config.base_currency,
+            "cash_buffer_bps": str(config.cash_buffer_bps),
+            "cash_buffer_absolute": str(config.cash_buffer_absolute),
+            "minimum_net_edge_bps": str(config.minimum_net_edge_bps),
+            "minimum_edge_to_cost_ratio": str(config.minimum_edge_to_cost_ratio),
+            "locked": profile.name.value == "aggressive" or not config.enabled,
+        }
+        if profile.name.value == "balanced" and profile.enabled and config.enabled:
+            bundle = load_balanced_cost_config(
+                profile, tariff_profile=args.cost_profile
+            )
+            payload.update(
+                {
+                    "config_hash": bundle.config_hash,
+                    "tariff_status": bundle.tariff.status.value,
+                    "tariff_effective_from": bundle.tariff.effective_from.isoformat(),
+                    "tariff_effective_to": (
+                        bundle.tariff.effective_to.isoformat()
+                        if bundle.tariff.effective_to else None
+                    ),
+                    "tariff_source": bundle.tariff.source_reference,
+                    "tariff_config_hash": bundle.tariff.config_hash,
+                    "instrument_metadata_count": len(bundle.instruments),
+                    "tax_rule_count": len(bundle.taxes),
+                    "critical_variable_components": list(
+                        bundle.config.critical_variable_components
+                    ),
+                }
+            )
+        print(_render_payload(payload, args.as_json))
+        return 0
+    if args.costs_command == "estimate":
+        settings = load_runtime_settings("PAPER", args.profile)
+        engine = BalancedTransactionCostEngine.from_profile(
+            settings.profile, tariff_profile=args.cost_profile
+        )
+        estimate = engine.estimate(
+            PreTradeCostRequest(
+                timestamp=args.timestamp,
+                symbol=args.symbol,
+                side=OrderSide(args.side),
+                quantity=args.quantity,
+                reference_price=args.price,
+                timeframe=args.timeframe,
+                spread_bps=args.spread_bps,
+                slippage_bps=args.slippage_bps,
+                order_id="cli-cost-estimate",
+            )
+        )
+        print(_render_payload(to_primitive(estimate), args.as_json))
+        return 0
+    raise AssertionError(f"unhandled costs command: {args.costs_command}")
+
+
+def _run_validation(args: argparse.Namespace) -> int:
+    store = LocalValidationStore(args.data_root / "validation")
+    if args.validation_command == "inspect":
+        print(_render_payload(store.inspect(args.validation_id), args.as_json))
+        return 0
+    if args.validation_command == "run":
+        from trading_ai.monitoring.source import BacktestMonitoringSource
+
+        data = BacktestMonitoringSource(args.data_root / "backtests").load_run(
+            args.run_id
+        )
+        report = ResearchValidationGate().evaluate_export(
+            summary=data.summary,
+            tables=data.tables,
+            integrity_verified=data.integrity_verified,
+            final_oos=args.final_oos_confirmed,
+            no_training_or_edge_overlap_confirmed=(
+                args.no_training_edge_overlap_confirmed
+            ),
+            real_data_available=args.real_data,
+            synthetic_mechanics_only=args.synthetic_mechanics_only,
+        )
+        path = store.save(report)
+        payload = to_primitive(report)
+        payload["report_path"] = str(path)
+        print(_render_payload(payload, args.as_json))
+        return 0 if report.status.value in {"PASS", "WARNING"} else 3
+    raise AssertionError(
+        f"unhandled validation command: {args.validation_command}"
+    )
 
 
 def _regime_snapshot_payload(snapshot) -> dict[str, Any]:
@@ -1186,6 +1357,23 @@ def _run_backtest(args: argparse.Namespace) -> int:
         primary_timeframe=args.timeframe,
         benchmark_symbol=benchmark_symbol,
     )
+    if any(
+        value != Decimal("0")
+        for value in (
+            args.commission_fixed,
+            args.commission_bps,
+            args.commission_minimum,
+        )
+    ):
+        raise ValueError(
+            "legacy commission flags cannot be combined with the explicit Lot 8.1 cost profile"
+        )
+    cost_engine = BalancedTransactionCostEngine.from_profile(
+        settings.profile, tariff_profile=args.cost_profile
+    )
+    economic_gate = EconomicGate(
+        cost_engine.bundle.config, cost_engine.config_hash
+    )
     risk_engine = BalancedRiskEngine.from_profile(settings.profile)
     result = BacktestEngine(
         risk_engine=risk_engine,
@@ -1195,6 +1383,8 @@ def _run_backtest(args: argparse.Namespace) -> int:
         ml_scorer=ml_scorer,
         ml_scorers=ml_scorers,
         portfolio_engine=portfolio_engine,
+        cost_engine=cost_engine,
+        economic_gate=economic_gate,
     ).run(
         strategy,
         datasets,
@@ -1300,6 +1490,36 @@ def _run_backtest(args: argparse.Namespace) -> int:
             if result.portfolio_metrics is not None
             else {"status": "unavailable / legacy sizing"}
         ),
+        "costs": (
+            {
+                "engine": result.cost_engine_name,
+                "version": result.cost_engine_version,
+                "config_hash": result.cost_config_hash,
+                "tariff_profile": result.tariff_profile_id,
+                "tariff_status": result.tariff_status,
+                "coverage": result.cost_summary.cost_coverage.value,
+                "gross_trading_pnl": (
+                    str(result.cost_summary.gross_trading_pnl)
+                    if result.cost_summary.gross_trading_pnl is not None else None
+                ),
+                "variable_trading_costs": (
+                    str(result.cost_summary.total_variable_cost)
+                    if result.cost_summary.total_variable_cost is not None else None
+                ),
+                "net_before_operating": (
+                    str(result.cost_summary.net_trading_pnl_before_operating)
+                    if result.cost_summary.net_trading_pnl_before_operating is not None else None
+                ),
+                "net_economic": (
+                    str(result.cost_summary.net_economic_pnl)
+                    if result.cost_summary.net_economic_pnl is not None else None
+                ),
+                "estimates": len(result.cost_estimates),
+                "actuals": len(result.cost_actuals),
+                "economic_decisions": len(result.economic_decisions),
+            }
+            if result.cost_summary is not None else {"status": "UNAVAILABLE"}
+        ),
         "strategy_parameters": dict(result.strategy_parameters),
         "export_path": str(export_directory),
         "warnings": list(result.warnings),
@@ -1329,6 +1549,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_ml(args)
         if args.command == "portfolio":
             return _run_portfolio(args)
+        if args.command == "costs":
+            return _run_costs(args)
+        if args.command == "validation":
+            return _run_validation(args)
         if args.command == "dashboard":
             return _run_dashboard(args)
         if args.command == "monitoring":
@@ -1339,6 +1563,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         RegimeError,
         MLError,
         MonitoringError,
+        CostError,
+        ValidationError,
         TradingAIError,
         ValueError,
     ) as exc:

@@ -41,6 +41,13 @@ PORTFOLIO_FILES = (
     "portfolio_targets.parquet",
     "portfolio_sleeves.parquet",
 )
+COST_FILES = (
+    "cost_estimates.parquet",
+    "cost_actuals.parquet",
+    "economic_decisions.parquet",
+    "cost_reconciliation.parquet",
+    "validation_report.json",
+)
 
 
 def _rising(symbol: str, slope: int, count: int = 90):
@@ -126,7 +133,7 @@ def test_verified_source_caches_parquet_but_rechecks_integrity(monitoring_export
     second = source.load_run(result.run_id)
     assert second is first
     assert source.parquet_parse_count == parse_count
-    assert first.schema_version == "1.5"
+    assert first.schema_version == "1.6"
     assert first.integrity_verified is True
 
 
@@ -137,7 +144,7 @@ def test_api_exposes_all_read_only_sections_and_full_decision_trace(
     run_id = result.run_id
     routes = (
         "overview", "equity", "portfolio", "strategies", "regimes", "ml",
-        "risk", "data-quality", "costs", "decisions", "events", "health",
+        "risk", "data-quality", "costs", "validation", "decisions", "events", "health",
     )
     for route in routes:
         response = dashboard_client.get(f"/api/v1/{route}", params={"run_id": run_id})
@@ -149,7 +156,7 @@ def test_api_exposes_all_read_only_sections_and_full_decision_trace(
     assert overview["cost_coverage_status"] == "INCOMPLETE"
 
     snapshot = dashboard_client.get("/api/v1/snapshot", params={"run_id": run_id}).json()
-    assert snapshot["source_schema_version"] == "1.5"
+    assert snapshot["source_schema_version"] == "1.6"
     assert snapshot["portfolio"]["engine_name"] == "balanced-portfolio"
     assert snapshot["ml"]["mode"] == "SCORE_ONLY"
     assert {item["name"] for item in snapshot["strategies"]["strategies"]} == {
@@ -159,9 +166,23 @@ def test_api_exposes_all_read_only_sections_and_full_decision_trace(
     trace = snapshot["decision_traces"][0]
     assert [item["stage"] for item in trace["steps"]] == [
         "Dataset", "Feature", "Regime", "Strategy", "Signal", "ML",
-        "Activation", "Portfolio", "Risk", "Order", "Fill",
+        "Activation", "Portfolio", "Cost Estimate", "Economic Gate", "Risk",
+        "Order", "Fill", "Actual Cost", "Cost Reconciliation",
     ]
-    assert all(item["status"] == "HEALTHY" for item in trace["steps"])
+    assert all(
+        item["status"] == "HEALTHY"
+        for item in trace["steps"]
+        if item["stage"] not in {
+            "Cost Estimate", "Economic Gate", "Actual Cost", "Cost Reconciliation"
+        }
+    )
+    assert all(
+        item["status"] == "UNAVAILABLE"
+        for item in trace["steps"]
+        if item["stage"] in {
+            "Cost Estimate", "Economic Gate", "Actual Cost", "Cost Reconciliation"
+        }
+    )
     events = dashboard_client.get(
         "/api/v1/events", params={"run_id": run_id, "event_type": "RISK_DECISION"}
     ).json()["events"]
@@ -197,7 +218,7 @@ def test_cost_endpoint_keeps_unimplemented_components_unavailable(
     assert costs["trading"]["transaction_tax"] == {
         "status": "UNAVAILABLE",
         "amount": None,
-        "source": "Lot 8.1 transaction-cost engine required",
+        "source": "transaction-cost component unavailable in this export",
     }
     assert costs["trading"]["fx_cost"]["amount"] is None
     assert costs["coverage_status"] == "INCOMPLETE"
@@ -272,6 +293,7 @@ def _downgrade(directory: Path, version: str) -> None:
         "ml_predictions.parquet": "1.4",
         "ml_decisions.parquet": "1.4",
         **{name: "1.5" for name in PORTFOLIO_FILES},
+        **{name: "1.6" for name in COST_FILES},
     }
     removed = tuple(
         name for name, minimum in file_minimum_version.items() if float(version) < float(minimum)
@@ -288,6 +310,8 @@ def _downgrade(directory: Path, version: str) -> None:
         "ml_decisions": "1.4", "portfolio_opportunities": "1.5",
         "portfolio_decisions": "1.5", "portfolio_plans": "1.5",
         "portfolio_targets": "1.5", "portfolio_sleeves": "1.5",
+        "cost_estimates": "1.6", "cost_actuals": "1.6",
+        "economic_decisions": "1.6", "cost_reconciliations": "1.6",
     }
     for name, minimum in count_minimum_version.items():
         if float(version) < float(minimum):
@@ -295,6 +319,9 @@ def _downgrade(directory: Path, version: str) -> None:
     for name, minimum in (("risk", "1.2"), ("regime", "1.3"), ("ml", "1.4"), ("portfolio", "1.5")):
         if float(version) < float(minimum):
             summary.pop(name, None)
+    if float(version) < 1.6:
+        summary.pop("costs", None)
+        summary.pop("validation", None)
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     checksum_path = directory / "checksums.json"
     checksums = json.loads(checksum_path.read_text(encoding="utf-8"))
@@ -304,7 +331,7 @@ def _downgrade(directory: Path, version: str) -> None:
     checksum_path.write_text(json.dumps(checksums, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-@pytest.mark.parametrize("version", ("1.0", "1.1", "1.2", "1.3", "1.4"))
+@pytest.mark.parametrize("version", ("1.0", "1.1", "1.2", "1.3", "1.4", "1.5"))
 def test_dashboard_opens_all_legacy_schemas_with_unavailable_sections(
     monitoring_export, tmp_path, version
 ) -> None:
@@ -321,7 +348,11 @@ def test_dashboard_opens_all_legacy_schemas_with_unavailable_sections(
         assert payload["regimes"]["status"] == "UNAVAILABLE"
     if float(version) < 1.4:
         assert payload["ml"]["status"] == "unavailable / not used"
-    assert payload["portfolio"]["status"] == "UNAVAILABLE"
+    if float(version) < 1.5:
+        assert payload["portfolio"]["status"] == "UNAVAILABLE"
+    else:
+        assert payload["portfolio"]["engine_name"] == "balanced-portfolio"
+    assert payload["validation"]["status"] == "UNAVAILABLE"
     if float(version) < 1.2:
         assert payload["risk"]["status"] == "UNAVAILABLE"
 

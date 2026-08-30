@@ -1,0 +1,12 @@
+[rules.france_ftt_2026]
+name = "French Financial Transaction Tax"
+currency = "EUR"
+rate_bps = "40"
+applicable_side = "BUY"
+effective_from = 2026-01-01T00:00:00Z
+effective_to = 2027-01-01T00:00:00Z
+source_name = "Légifrance — CGI article 235 ter ZD"
+source_reference = "https://www.legifrance.gouv.fr/codes/section_lc/LEGITEXT000006069577/LEGISCTA000006162552/2026-01-01"
+verified_at = 2026-08-29T00:00:00Z
+status = "VERIFIED"
+version = "2026"

@@ -23,7 +23,8 @@ from trading_ai.monitoring.source import BacktestMonitoringData
 
 _TRACE_STAGES = (
     "Dataset", "Feature", "Regime", "Strategy", "Signal", "ML",
-    "Activation", "Portfolio", "Risk", "Order", "Fill",
+    "Activation", "Portfolio", "Cost Estimate", "Economic Gate", "Risk",
+    "Order", "Fill", "Actual Cost", "Cost Reconciliation",
 )
 
 
@@ -91,6 +92,11 @@ class BacktestViewBuilder:
         regimes = self._regimes(summary, tables)
         ml = self._ml(summary, tables)
         risk = self._risk(summary, tables)
+        validation = (
+            summary.get("validation")
+            if isinstance(summary.get("validation"), dict)
+            else {"status": "UNAVAILABLE"}
+        )
         data_quality = self._data_quality(summary)
         decisions = self._decisions(tables)
         traces = [to_primitive(item) for item in self.build_traces(data)]
@@ -145,6 +151,11 @@ class BacktestViewBuilder:
                 "data_quality_status": data_quality["overall_status"],
                 "known_trading_costs": str(costs.known_trading_costs),
                 "cost_coverage_status": costs.coverage_status.value,
+                "net_completeness": (
+                    "NET COMPLETE"
+                    if costs.coverage_status.value == "COMPLETE"
+                    else "NET INCOMPLETE"
+                ),
                 "cost_warning": costs.warnings[0] if costs.warnings else None,
             },
             "equity": {
@@ -159,6 +170,7 @@ class BacktestViewBuilder:
             "risk": risk,
             "data_quality": data_quality,
             "costs": to_primitive(costs),
+            "validation": validation,
             "decisions": decisions,
             "decision_traces": traces,
             "health": to_primitive(health),
@@ -335,20 +347,33 @@ class BacktestViewBuilder:
 
     @staticmethod
     def _data_quality(summary: dict[str, Any]) -> dict[str, Any]:
+        reports = {
+            (str(item.get("symbol")), str(item.get("timeframe"))): item
+            for item in (summary.get("data_quality_reports", []) or [])
+            if isinstance(item, dict)
+        }
         datasets = []
         for item in summary.get("dataset_references", []) or []:
+            report = reports.get((str(item.get("symbol")), str(item.get("timeframe"))))
             datasets.append(
                 {
                     **item,
-                    "row_count": _unavailable("DataQualityReport was not embedded in this result schema"),
-                    "gaps": _unavailable("DataQualityReport was not embedded in this result schema"),
-                    "duplicates": _unavailable("DataQualityReport was not embedded in this result schema"),
-                    "invalid_bars": _unavailable("DataQualityReport was not embedded in this result schema"),
-                    "quality_status": "UNAVAILABLE",
+                    "row_count": report.get("row_count") if report else _unavailable(),
+                    "gaps": report.get("missing_expected_bar_count") if report else _unavailable(),
+                    "duplicates": report.get("duplicate_count") if report else _unavailable(),
+                    "invalid_bars": report.get("invalid_bar_count") if report else _unavailable(),
+                    "quality_status": report.get("quality_status", "UNAVAILABLE") if report else "UNAVAILABLE",
                 }
             )
+        statuses = {str(item.get("quality_status")) for item in datasets}
+        overall = (
+            "FAIL" if "FAIL" in statuses
+            else "WARNING" if "WARNING" in statuses
+            else "PASS" if statuses == {"PASS"}
+            else "UNAVAILABLE"
+        )
         return {
-            "overall_status": "UNAVAILABLE" if datasets else "UNAVAILABLE",
+            "overall_status": overall,
             "datasets": datasets,
             "warnings": list(summary.get("warnings", []) or []),
             "integrity": "VERIFIED",
@@ -361,9 +386,13 @@ class BacktestViewBuilder:
             ("ML", "ml_decisions", "decision_id", "status"),
             ("Activation", "activation_decisions", "decision_id", "status"),
             ("Portfolio", "portfolio_decisions", "decision_id", "status"),
+            ("Costs", "cost_estimates", "estimate_id", None),
+            ("Economics", "economic_decisions", "decision_id", "status"),
             ("Risk", "risk_decisions", "decision_id", "status"),
             ("Execution", "orders", "order_id", "status"),
             ("Execution", "fills", "fill_id", None),
+            ("Costs", "cost_actuals", "actual_cost_id", None),
+            ("Costs", "cost_reconciliation", "reconciliation_id", "coverage"),
         )
         records: list[dict[str, Any]] = []
         for component, table_name, id_name, status_name in specs:
@@ -421,6 +450,10 @@ class BacktestViewBuilder:
         predictions = {str(item.get("prediction_id")): item for item in tables.get("ml_predictions", ())}
         portfolio_decisions = {str(item.get("decision_id")): item for item in tables.get("portfolio_decisions", ())}
         risk_decisions = {str(item.get("decision_id")): item for item in tables.get("risk_decisions", ())}
+        cost_estimates = {str(item.get("estimate_id")): item for item in tables.get("cost_estimates", ())}
+        economic_decisions = {str(item.get("decision_id")): item for item in tables.get("economic_decisions", ())}
+        actual_costs = {str(item.get("fill_id")): item for item in tables.get("cost_actuals", ())}
+        reconciliations = {str(item.get("fill_id")): item for item in tables.get("cost_reconciliation", ())}
         fills: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for item in tables.get("fills", ()):
             fills[str(item.get("order_id"))].append(item)
@@ -434,8 +467,18 @@ class BacktestViewBuilder:
             ml_decision = ml_decisions.get(str(order.get("ml_decision_id")))
             prediction = predictions.get(str(ml_decision.get("prediction_id"))) if ml_decision else None
             portfolio = portfolio_decisions.get(str(order.get("portfolio_decision_id")))
+            cost_estimate = cost_estimates.get(str(order.get("cost_estimate_id")))
+            economic = economic_decisions.get(str(order.get("economic_decision_id")))
             risk = risk_decisions.get(str(order.get("risk_decision_id")))
             order_fills = fills.get(order_id, [])
+            actual = (
+                actual_costs.get(str(order_fills[0].get("fill_id")))
+                if order_fills else None
+            )
+            reconciliation = (
+                reconciliations.get(str(order_fills[0].get("fill_id")))
+                if order_fills else None
+            )
             timestamp = _utc(order.get("created_at"))
             symbol = str(order.get("symbol") or "UNAVAILABLE")
             strategy_name = signal.get("strategy_name") if signal else None
@@ -449,9 +492,13 @@ class BacktestViewBuilder:
                 "ML": ({"decision": ml_decision, "prediction": prediction} if ml_decision or prediction else None, ml_decision.get("decision_id") if ml_decision else None, (ml_decision.get("reason_code"),) if ml_decision and ml_decision.get("reason_code") else (), (ml_decision.get("human_reason"),) if ml_decision and ml_decision.get("human_reason") else ()),
                 "Activation": (activation, activation.get("decision_id") if activation else None, activation.get("reason_codes", ()) if activation else (), activation.get("human_readable_reasons", ()) if activation else ()),
                 "Portfolio": (portfolio, portfolio.get("decision_id") if portfolio else None, portfolio.get("reason_codes", ()) if portfolio else (), portfolio.get("human_reasons", ()) if portfolio else ()),
+                "Cost Estimate": (cost_estimate, cost_estimate.get("estimate_id") if cost_estimate else None, cost_estimate.get("warnings", ()) if cost_estimate else (), ()),
+                "Economic Gate": (economic, economic.get("decision_id") if economic else None, economic.get("reason_codes", ()) if economic else (), economic.get("human_reasons", ()) if economic else ()),
                 "Risk": (risk, risk.get("decision_id") if risk else None, risk.get("reason_codes", ()) if risk else (), risk.get("human_readable_reasons", ()) if risk else ()),
                 "Order": (order, order_id, (str(order.get("status_reason")),) if order.get("status_reason") else (), ()),
                 "Fill": (order_fills, order_fills[0].get("fill_id") if order_fills else None, (), ()),
+                "Actual Cost": (actual, actual.get("actual_cost_id") if actual else None, (), ()),
+                "Cost Reconciliation": (reconciliation, reconciliation.get("reconciliation_id") if reconciliation else None, (), ()),
             }
             steps = []
             for stage in _TRACE_STAGES:

@@ -100,4 +100,16 @@ These rules apply to Codex and every future development agent working in this re
 - Remote or public Dashboard exposure requires future authentication and is not allowed by default.
 - Monitoring contracts must remain reusable for future Paper/Live sessions without importing brokers into the Dashboard.
 - Trading-cost assumptions belong to a dedicated cost configuration/engine, never to UI code.
+- Unknown transaction-cost components must remain `UNAVAILABLE` and must never be coerced to numeric zero.
+- Commission, exchange/pass-through fees, spread, slippage, tax, FX, financing, and other costs must never be double counted between execution price, ledger cash, and reporting.
+- Tariffs and transaction-tax rules must be configuration-driven, dated, versioned, SHA-256 hashed, and source-provenanced.
+- Pre-trade cost estimates may use only information available at decision time `t`; future opens, fills, returns, or bars are forbidden.
+- Pending BUY reservations must include point-in-time notional, estimated entry costs, and the configured cash buffer.
+- A cash buffer reserves capacity but must not be reported as a realized cost when unused.
+- ML probabilities must never be converted directly into an expected return or economic edge.
+- `EconomicGate` must never block a risk-reducing exit, authorize execution, or bypass `BalancedRiskEngine`.
+- Final TEST data must never tune strategy, ML, regime, portfolio, Risk, expected-edge, buffer, tariff, or transaction-cost assumptions.
+- A Validation Gate `PASS` is a research status only and must never unlock Paper, `LIVE`, a broker, or profile activation.
+- Applying a current tariff retrospectively must be disclosed and must not be represented as historically verified.
+- TLS certificate verification must never be disabled; `verify=False` and equivalent certificate bypasses are forbidden.
 - Update `PROJECT_STATE.md` when a lot changes state.

@@ -13,9 +13,9 @@ from trading_ai.backtesting.reproducibility import to_primitive
 from trading_ai.core.models import BacktestResult
 
 
-RESULT_SCHEMA_VERSION = "1.5"
+RESULT_SCHEMA_VERSION = "1.6"
 _SAFE_RUN_ID = re.compile(r"^[A-Za-z0-9_-]+$")
-_EXPORTED_FILES = frozenset(
+_LOT7_EXPORTED_FILES = frozenset(
     {
         "summary.json",
         "equity.parquet",
@@ -37,7 +37,14 @@ _EXPORTED_FILES = frozenset(
         "portfolio_sleeves.parquet",
     }
 )
-_LOT6_EXPORTED_FILES = _EXPORTED_FILES - {
+_EXPORTED_FILES = _LOT7_EXPORTED_FILES | {
+    "cost_estimates.parquet",
+    "cost_actuals.parquet",
+    "economic_decisions.parquet",
+    "cost_reconciliation.parquet",
+    "validation_report.json",
+}
+_LOT6_EXPORTED_FILES = _LOT7_EXPORTED_FILES - {
     "portfolio_opportunities.parquet",
     "portfolio_decisions.parquet",
     "portfolio_targets.parquet",
@@ -111,6 +118,28 @@ class BacktestResultStore:
         temporary.replace(path)
 
     @staticmethod
+    def _cost_estimate_record(item) -> dict[str, Any]:
+        payload = to_primitive(item)
+        for name in (
+            "entry_costs",
+            "estimated_exit_costs",
+            "round_trip_costs",
+            "cash_requirement",
+        ):
+            payload[name] = json.dumps(
+                payload[name], sort_keys=True, separators=(",", ":")
+            )
+        return payload
+
+    @staticmethod
+    def _cost_actual_record(item) -> dict[str, Any]:
+        payload = to_primitive(item)
+        payload["breakdown"] = json.dumps(
+            payload["breakdown"], sort_keys=True, separators=(",", ":")
+        )
+        return payload
+
+    @staticmethod
     def _equity_schema():
         import pyarrow as pa
 
@@ -142,6 +171,16 @@ class BacktestResultStore:
                 ("commission", pa.string()),
                 ("slippage_cost", pa.string()),
                 ("spread_cost", pa.string()),
+                ("exchange_fees", pa.string()),
+                ("transaction_tax", pa.string()),
+                ("fx_cost", pa.string()),
+                ("financing_cost", pa.string()),
+                ("other_variable_cost", pa.string()),
+                ("total_variable_cost", pa.string()),
+                ("cost_estimate_id", pa.string()),
+                ("economic_decision_id", pa.string()),
+                ("actual_cost_id", pa.string()),
+                ("unavailable_cost_components", pa.list_(pa.string())),
             ]
         )
 
@@ -165,6 +204,11 @@ class BacktestResultStore:
                 ("net_pnl", pa.string()),
                 ("return_pct", pa.string()),
                 ("holding_period_seconds", pa.float64()),
+                ("exchange_fees", pa.string()),
+                ("transaction_tax", pa.string()),
+                ("fx_cost", pa.string()),
+                ("financing_cost", pa.string()),
+                ("other_variable_cost", pa.string()),
             ]
         )
 
@@ -193,6 +237,105 @@ class BacktestResultStore:
                 ("portfolio_decision_id", pa.string()),
                 ("portfolio_opportunity_ids", pa.list_(pa.string())),
                 ("risk_decision_id", pa.string()),
+                ("cost_estimate_id", pa.string()),
+                ("economic_decision_id", pa.string()),
+            ]
+        )
+
+    @staticmethod
+    def _cost_estimate_schema():
+        import pyarrow as pa
+
+        return pa.schema(
+            [
+                ("estimate_id", pa.string()),
+                ("timestamp", pa.string()),
+                ("order_id", pa.string()),
+                ("symbol", pa.string()),
+                ("side", pa.string()),
+                ("quantity", pa.string()),
+                ("reference_price", pa.string()),
+                ("entry_costs", pa.string()),
+                ("estimated_exit_costs", pa.string()),
+                ("round_trip_costs", pa.string()),
+                ("cash_requirement", pa.string()),
+                ("engine_name", pa.string()),
+                ("engine_version", pa.string()),
+                ("config_hash", pa.string()),
+                ("tariff_profile_id", pa.string()),
+                ("tariff_status", pa.string()),
+                ("tariff_config_hash", pa.string()),
+                ("tariff_period_covered", pa.bool_()),
+                ("lineage", pa.list_(pa.list_(pa.string(), 2))),
+                ("warnings", pa.list_(pa.string())),
+            ]
+        )
+
+    @staticmethod
+    def _cost_actual_schema():
+        import pyarrow as pa
+
+        return pa.schema(
+            [
+                ("actual_cost_id", pa.string()),
+                ("estimate_id", pa.string()),
+                ("order_id", pa.string()),
+                ("fill_id", pa.string()),
+                ("timestamp", pa.string()),
+                ("symbol", pa.string()),
+                ("quantity", pa.string()),
+                ("reference_price", pa.string()),
+                ("execution_price", pa.string()),
+                ("breakdown", pa.string()),
+                ("engine_name", pa.string()),
+                ("engine_version", pa.string()),
+                ("config_hash", pa.string()),
+            ]
+        )
+
+    @staticmethod
+    def _economic_decision_schema():
+        import pyarrow as pa
+
+        return pa.schema(
+            [
+                ("decision_id", pa.string()),
+                ("timestamp", pa.string()),
+                ("order_id", pa.string()),
+                ("signal_id", pa.string()),
+                ("cost_estimate_id", pa.string()),
+                ("expected_edge_id", pa.string()),
+                ("status", pa.string()),
+                ("expected_gross_edge_bps", pa.string()),
+                ("estimated_round_trip_cost_bps", pa.string()),
+                ("expected_net_edge_bps", pa.string()),
+                ("edge_to_cost_ratio", pa.string()),
+                ("reason_codes", pa.list_(pa.string())),
+                ("human_reasons", pa.list_(pa.string())),
+                ("gate_name", pa.string()),
+                ("gate_version", pa.string()),
+                ("config_hash", pa.string()),
+                ("allows_new_risk", pa.bool_()),
+            ]
+        )
+
+    @staticmethod
+    def _cost_reconciliation_schema():
+        import pyarrow as pa
+
+        return pa.schema(
+            [
+                ("reconciliation_id", pa.string()),
+                ("estimate_id", pa.string()),
+                ("actual_cost_id", pa.string()),
+                ("order_id", pa.string()),
+                ("fill_id", pa.string()),
+                ("timestamp", pa.string()),
+                ("estimated_total", pa.string()),
+                ("actual_total", pa.string()),
+                ("estimate_error", pa.string()),
+                ("component_errors", pa.list_(pa.list_(pa.string(), 2))),
+                ("coverage", pa.string()),
             ]
         )
 
@@ -518,6 +661,7 @@ class BacktestResultStore:
                 "strategy_version": result.strategy_version,
                 "strategy_parameters": result.strategy_parameters,
                 "dataset_references": result.dataset_references,
+                "data_quality_reports": result.data_quality_reports,
                 "config": result.config,
                 "initial_cash": result.initial_cash,
                 "final_equity": result.final_equity,
@@ -573,6 +717,24 @@ class BacktestResultStore:
                     "metrics": result.portfolio_metrics,
                     "plans": result.portfolio_plans,
                 },
+                "costs": {
+                    "engine_name": result.cost_engine_name,
+                    "engine_version": result.cost_engine_version,
+                    "config": result.cost_config,
+                    "config_hash": result.cost_config_hash,
+                    "tariff_profile_id": result.tariff_profile_id,
+                    "tariff_status": result.tariff_status,
+                    "summary": result.cost_summary,
+                    "operating": result.operating_costs,
+                },
+                "validation": (
+                    result.validation_report
+                    if result.validation_report is not None
+                    else {
+                        "status": "UNAVAILABLE",
+                        "reason": "validation has not been run for this export",
+                    }
+                ),
                 "counts": {
                     "equity_points": len(result.equity_curve),
                     "orders": len(result.orders),
@@ -592,6 +754,10 @@ class BacktestResultStore:
                     "portfolio_plans": len(result.portfolio_plans),
                     "portfolio_targets": len(result.portfolio_targets),
                     "portfolio_sleeves": len(result.portfolio_sleeves),
+                    "cost_estimates": len(result.cost_estimates),
+                    "cost_actuals": len(result.cost_actuals),
+                    "economic_decisions": len(result.economic_decisions),
+                    "cost_reconciliations": len(result.cost_reconciliations),
                 },
             }
         )
@@ -689,6 +855,34 @@ class BacktestResultStore:
                 (to_primitive(item) for item in result.portfolio_sleeves),
                 self._portfolio_sleeve_schema(),
             )
+            self._write_parquet(
+                directory / "cost_estimates.parquet",
+                (self._cost_estimate_record(item) for item in result.cost_estimates),
+                self._cost_estimate_schema(),
+            )
+            self._write_parquet(
+                directory / "cost_actuals.parquet",
+                (self._cost_actual_record(item) for item in result.cost_actuals),
+                self._cost_actual_schema(),
+            )
+            self._write_parquet(
+                directory / "economic_decisions.parquet",
+                (to_primitive(item) for item in result.economic_decisions),
+                self._economic_decision_schema(),
+            )
+            self._write_parquet(
+                directory / "cost_reconciliation.parquet",
+                (to_primitive(item) for item in result.cost_reconciliations),
+                self._cost_reconciliation_schema(),
+            )
+            self._write_json(
+                directory / "validation_report.json",
+                (
+                    to_primitive(result.validation_report)
+                    if result.validation_report is not None
+                    else {"status": "UNAVAILABLE", "reason": "validation not run"}
+                ),
+            )
             checksums = {
                 name: _sha256_file(directory / name)
                 for name in sorted(_EXPORTED_FILES)
@@ -718,6 +912,7 @@ class BacktestResultStore:
             exported_files = frozenset(payload["files"])
             if exported_files not in {
                 _EXPORTED_FILES,
+                _LOT7_EXPORTED_FILES,
                 _LOT6_EXPORTED_FILES,
                 _LOT5_EXPORTED_FILES,
                 _LOT4_EXPORTED_FILES,
@@ -749,6 +944,7 @@ class BacktestResultStore:
                 "1.2": _LOT4_EXPORTED_FILES,
                 "1.3": _LOT5_EXPORTED_FILES,
                 "1.4": _LOT6_EXPORTED_FILES,
+                "1.5": _LOT7_EXPORTED_FILES,
                 RESULT_SCHEMA_VERSION: _EXPORTED_FILES,
             }.get(summary.get("schema_version"))
             if expected_files is None or exported_files != expected_files:
@@ -780,4 +976,11 @@ class BacktestResultStore:
             payload["portfolio"] = {
                 "status": "unavailable / legacy sizing"
             }
+        if "costs" not in payload:
+            payload["costs"] = {
+                "status": "UNAVAILABLE",
+                "coverage": "INCOMPLETE",
+            }
+        if "validation" not in payload:
+            payload["validation"] = {"status": "UNAVAILABLE"}
         return payload

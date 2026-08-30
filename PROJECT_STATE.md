@@ -12,7 +12,8 @@
 - Lot 6 — ML Platform Foundation & Statistical Scoring: DONE
 - Lot 7 — Multi-Strategy Portfolio Engine: DONE
 - Lot 8 — Dashboard & Observability: DONE
-- Lot 8.1 — Validation Gate & Transaction Cost Economics: TODO
+- Lot 8.1 — Validation Gate & Transaction Cost Economics: DONE
+- Real Data Validation Campaign: FAIL
 - Lot 9 — Broker / Paper Trading: TODO
 - Lot 10 — Balanced Paper Validation: TODO
 - Lot 11 — Limited Live: TODO
@@ -60,3 +61,9 @@ Delivered: `BalancedPortfolioEngine` 1.0 with profile/Risk-bounded TOML configur
 ## Lot 8 delivery summary
 
 Delivered: immutable UTC monitoring events/snapshots, health and decision-trace contracts; checksum-verified `BacktestMonitoringSource` with schemas 1.0–1.5 and fingerprinted Parquet cache; a local SQLite event/snapshot store; deterministic read models for Overview, Equity/Drawdown, Portfolio, Strategies, Regimes, ML, Risk, Data Quality, Costs, System Health, decision history, and complete order lineage; a responsive FastAPI/Jinja2/vanilla-JS Dashboard and versioned JSON API restricted to loopback hosts and read-only HTTP routes; defensive metadata escaping/redaction and path-traversal/integrity refusal; explicit `KNOWN`/`ESTIMATED`/`UNAVAILABLE` trading and operating cost coverage with no unknown-to-zero conversion; Dashboard/Monitoring CLI diagnostics; and offline API/UI/store/security/backward-compatibility tests. No broker, order transmission, remote exposure, cloud service, market stream, strategy mutation, Risk bypass, or `LIVE` control was added. Lot 8.1 is reserved for the real Transaction Cost Engine and economic validation gate. Future ML Evolution remains PLANNED / LOCKED and Aggressive Research remains LOCKED.
+
+## Lot 8.1 delivery summary
+
+Delivered: `BalancedTransactionCostEngine` 1.0 with dated, versioned, source-provenanced and SHA-256-hashed tariff/tax/instrument configurations; explicit KNOWN/ESTIMATED/NOT_APPLICABLE/UNAVAILABLE commission, spread, slippage, exchange, tax, FX, financing, other-variable, and operating-cost states; point-in-time entry/round-trip estimates, cost-aware cash and pending reservations, realized-cost ledger debits, reconciliation, and anti-double-count controls; a separate expected-edge contract and fail-closed `EconomicGate`; schema 1.6 lineage/exports and Dashboard monitoring; local CSV/Parquet historical ingestion; immutable `ResearchValidationGate` reports with OOS, integrity, cost coverage, tariff-period, sample, net metric, drawdown, cash, circuit-breaker, stress, subperiod, and symbol-concentration checks; offline Cost/Validation CLI commands and regression/security tests. No broker, Paper/`LIVE` unlock, neural network, stream, online learning, or test-driven threshold optimization was added.
+
+The controlled real-data campaign used all 13 configured Balanced symbols at `1d` from 2020-01-01 through 2025-01-01 with checksum-verified Yahoo datasets and strict TLS verification. Dataset integrity and DataQuality passed, but the immutable campaign result is `FAIL`: the current IBKR reference tariff is not historically verified for the tested dates, only 16 trades closed versus the predeclared minimum of 30, and observed drawdown reached 11.23% versus the 10% limit. Operating costs remain unavailable and the configured universe still carries `SURVIVORSHIP_BIAS_NOT_RESOLVED`. This result does not unlock Paper or `LIVE`.

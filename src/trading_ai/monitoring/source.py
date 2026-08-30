@@ -20,6 +20,7 @@ from trading_ai.monitoring.exceptions import (
 )
 from trading_ai.monitoring.models import MonitoringEvent, MonitoringEventType
 from trading_ai.monitoring.security import redact_sensitive
+from trading_ai.validation.storage import LocalValidationStore
 
 
 _SAFE_RUN_ID = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -41,6 +42,10 @@ _TABLES = (
     "portfolio_decisions",
     "portfolio_targets",
     "portfolio_sleeves",
+    "cost_estimates",
+    "cost_actuals",
+    "economic_decisions",
+    "cost_reconciliation",
 )
 
 
@@ -63,11 +68,12 @@ class _CacheEntry:
 
 
 class BacktestMonitoringSource(MonitoringSource):
-    """Read schemas 1.0--1.5 only after existing SHA-256 verification succeeds."""
+    """Read schemas 1.0--1.6 only after existing SHA-256 verification succeeds."""
 
     def __init__(self, root: Path | str = Path("data_local/backtests")) -> None:
         self.root = Path(root)
         self.result_store = BacktestResultStore(self.root)
+        self.validation_store = LocalValidationStore(self.root.parent / "validation")
         self._cache: dict[str, _CacheEntry] = {}
         self.parquet_parse_count = 0
 
@@ -115,6 +121,9 @@ class BacktestMonitoringSource(MonitoringSource):
         directory = self._directory(run_id)
         try:
             summary = redact_sensitive(self.result_store.inspect(run_id))
+            latest_validation = self.validation_store.latest_for_run(run_id)
+            if latest_validation is not None:
+                summary["validation"] = redact_sensitive(latest_validation)
             checksums_bytes = (directory / "checksums.json").read_bytes()
             fingerprint = hashlib.sha256(checksums_bytes).hexdigest()
             cache_token = self.cache_token(run_id)
@@ -177,6 +186,7 @@ class BacktestMonitoringSource(MonitoringSource):
                 {
                     "checksum_manifest": hashlib.sha256(checksum_bytes).hexdigest(),
                     "files": metadata,
+                    "validation": self.validation_store.latest_for_run(run_id),
                 }
             )
         except FileNotFoundError as exc:
@@ -204,6 +214,7 @@ class BacktestMonitoringSource(MonitoringSource):
         regime = summary.get("regime") if isinstance(summary.get("regime"), dict) else {}
         ml = summary.get("ml") if isinstance(summary.get("ml"), dict) else {}
         portfolio = summary.get("portfolio") if isinstance(summary.get("portfolio"), dict) else {}
+        costs = summary.get("costs") if isinstance(summary.get("costs"), dict) else {}
         specs = (
             ("equity", MonitoringEventType.EQUITY_UPDATE, "EquityCurve", "1", "timestamp", None),
             ("ledger", MonitoringEventType.POSITION_UPDATE, "PortfolioLedger", "1", "timestamp", "entry_id"),
@@ -213,9 +224,13 @@ class BacktestMonitoringSource(MonitoringSource):
             ("ml_decisions", MonitoringEventType.ML_DECISION, "MLFilter", "1", "timestamp", "decision_id"),
             ("activation_decisions", MonitoringEventType.ACTIVATION_DECISION, str(regime.get("policy_name", "StrategyActivationPolicy")), str(regime.get("policy_version", "UNAVAILABLE")), "timestamp", "decision_id"),
             ("portfolio_decisions", MonitoringEventType.PORTFOLIO_DECISION, str(portfolio.get("engine_name", "PortfolioEngine")), str(portfolio.get("engine_version", "UNAVAILABLE")), "timestamp", "decision_id"),
+            ("cost_estimates", MonitoringEventType.COST_ESTIMATE, str(costs.get("engine_name", "TransactionCostEngine")), str(costs.get("engine_version", "UNAVAILABLE")), "timestamp", "estimate_id"),
+            ("economic_decisions", MonitoringEventType.ECONOMIC_DECISION, "EconomicGate", "1.0", "timestamp", "decision_id"),
             ("risk_decisions", MonitoringEventType.RISK_DECISION, str(risk.get("engine_name", "RiskEngine")), str(risk.get("engine_version", "UNAVAILABLE")), "timestamp", "decision_id"),
             ("orders", MonitoringEventType.ORDER_INTENT, "BacktestExecution", "1", "created_at", "order_id"),
             ("fills", MonitoringEventType.FILL, "BarExecutionModel", "1", "timestamp", "fill_id"),
+            ("cost_actuals", MonitoringEventType.COST_ACTUAL, str(costs.get("engine_name", "TransactionCostEngine")), str(costs.get("engine_version", "UNAVAILABLE")), "timestamp", "actual_cost_id"),
+            ("cost_reconciliation", MonitoringEventType.COST_RECONCILIATION, str(costs.get("engine_name", "TransactionCostEngine")), str(costs.get("engine_version", "UNAVAILABLE")), "timestamp", "reconciliation_id"),
         )
         provenance = tuple(
             sorted(
@@ -267,4 +282,27 @@ class BacktestMonitoringSource(MonitoringSource):
                         status=str(row.get("status") or row.get("action")) if row.get("status") or row.get("action") else None,
                     )
                 )
+        validation = summary.get("validation")
+        if isinstance(validation, dict) and validation.get("validation_id"):
+            timestamp = datetime.fromisoformat(
+                str(validation.get("created_at")).replace("Z", "+00:00")
+            ).astimezone(timezone.utc)
+            events.append(
+                MonitoringEvent(
+                    event_id=f"{data.run_id}:VALIDATION_RESULT:{validation['validation_id']}",
+                    timestamp=timestamp,
+                    event_type=MonitoringEventType.VALIDATION_RESULT,
+                    run_id=data.run_id,
+                    session_id=data.run_id,
+                    source_component=str(validation.get("gate_name", "ValidationGate")),
+                    component_version=str(validation.get("gate_version", "UNAVAILABLE")),
+                    related_ids=(("validation_id", str(validation["validation_id"])),),
+                    provenance=provenance,
+                    payload_json=json.dumps(
+                        to_primitive(validation), sort_keys=True,
+                        separators=(",", ":"), allow_nan=False,
+                    ),
+                    status=str(validation.get("status", "UNAVAILABLE")),
+                )
+            )
         return tuple(sorted(events, key=lambda item: (item.timestamp, item.event_id)))

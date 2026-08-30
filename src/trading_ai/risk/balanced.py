@@ -348,7 +348,29 @@ class BalancedRiskEngine(RiskEngine):
             caps.append(order.quantity * volatility.multiplier)
             codes.append(RiskReasonCode.VOLATILITY_LIMIT)
 
-        cash_cap = context.cash / context.expected_entry_price
+        # When an explicitly injected TransactionCostEngine supplied a complete
+        # point-in-time estimate, reserve notional + entry costs + buffer per
+        # unit. Legacy/no-cost contexts retain the historical price-only cap.
+        if order.estimated_cash_requirement is not None:
+            # Keep every point-in-time estimated order cost and buffer reserved
+            # while reducing notional. This is deliberately conservative for
+            # minimum-per-order commissions and can never create negative cash.
+            requested_notional = order.quantity * context.expected_entry_price
+            non_notional_reserve = max(
+                Decimal("0"),
+                order.estimated_cash_requirement - requested_notional,
+            )
+            cash_cap = max(
+                Decimal("0"),
+                (context.cash - non_notional_reserve)
+                / context.expected_entry_price,
+            )
+        else:
+            cash_per_unit = (
+                order.estimated_unit_cash_requirement
+                or context.expected_entry_price
+            )
+            cash_cap = context.cash / cash_per_unit
         caps.append(cash_cap)
         if cash_cap < order.quantity:
             codes.append(RiskReasonCode.INSUFFICIENT_CASH)

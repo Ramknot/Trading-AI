@@ -1,0 +1,18 @@
+currency = "USD"
+
+[market_data_subscription]
+status = "UNAVAILABLE"
+source_reference = "No deployment subscription selected in Lot 8.1"
+
+[server_vps]
+status = "UNAVAILABLE"
+source_reference = "No deployment host selected in Lot 8.1"
+
+[software_subscription]
+status = "UNAVAILABLE"
+source_reference = "No deployment subscription selected in Lot 8.1"
+
+[other_fixed_cost]
+status = "NOT_APPLICABLE"
+amount = "0"
+source_reference = "No other fixed cost declared"

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from itertools import groupby
 from typing import Any
@@ -52,6 +52,20 @@ from trading_ai.core.models import (
     RiskDecisionStatus,
     TradingContext,
 )
+from trading_ai.costs.base import TransactionCostEngine
+from trading_ai.costs.economics import EconomicGate
+from trading_ai.costs.models import (
+    ActualTradingCost,
+    CostComponent,
+    CostCoverage,
+    CostReconciliation,
+    CostStatus,
+    EconomicDecision,
+    ExpectedEdgeEstimate,
+    PreTradeCostEstimate,
+    PreTradeCostRequest,
+)
+from trading_ai.costs.reporting import build_cost_summary
 from trading_ai.data.models import (
     CorporateAction,
     DataKind,
@@ -88,6 +102,20 @@ from trading_ai.regimes.reporting import build_regime_report
 
 
 ExecutionModelFactory = Callable[[BacktestConfig], ExecutionModel]
+ExpectedEdgeProvider = Callable[
+    [StrategySignal, PreTradeCostEstimate], ExpectedEdgeEstimate
+]
+
+
+def _fill_cost_amount(component: CostComponent) -> Decimal:
+    """Bridge legacy numeric Fill fields without hiding unavailable coverage.
+
+    ``Fill.unavailable_cost_components`` and ``total_variable_cost=None`` retain
+    the fail-closed state.  The numeric placeholder is never used to claim a
+    complete total or economic validation.
+    """
+
+    return component.amount if component.amount is not None else Decimal("0")
 
 
 def _event_key(bar: MarketBar) -> tuple[datetime, str, str]:
@@ -124,6 +152,9 @@ class BacktestEngine(Backtester):
         ml_scorer: MLScorer | None = None,
         ml_scorers: Mapping[str, MLScorer] | None = None,
         portfolio_engine: PortfolioEngine | None = None,
+        cost_engine: TransactionCostEngine | None = None,
+        economic_gate: EconomicGate | None = None,
+        expected_edge_provider: ExpectedEdgeProvider | None = None,
         code_version: str | None = None,
     ) -> None:
         if (regime_detector is None) != (activation_policy is None):
@@ -148,6 +179,14 @@ class BacktestEngine(Backtester):
             raise BacktestConfigurationError(
                 "active strategy-keyed ML requires regime detector and policy"
             )
+        if (cost_engine is None) != (economic_gate is None):
+            raise BacktestConfigurationError(
+                "cost_engine and economic_gate must be explicitly injected together"
+            )
+        if expected_edge_provider is not None and cost_engine is None:
+            raise BacktestConfigurationError(
+                "expected edge provider requires an explicit cost/economic gate"
+            )
         self._execution_model_factory = (
             execution_model_factory or BarExecutionModel
         )
@@ -159,6 +198,9 @@ class BacktestEngine(Backtester):
         self._ml_scorer = ml_scorer
         self._ml_scorers = dict(ml_scorers or {})
         self._portfolio_engine = portfolio_engine
+        self._cost_engine = cost_engine
+        self._economic_gate = economic_gate
+        self._expected_edge_provider = expected_edge_provider
         self._code_version = code_version
 
     @property
@@ -299,8 +341,15 @@ class BacktestEngine(Backtester):
         portfolio_decisions: list[PortfolioDecision] = []
         portfolio_plans: list[RebalancePlan] = []
         portfolio_sleeves: list[StrategySleeveState] = []
-        pending_buy_risk: dict[str, tuple[str, Decimal, Decimal]] = {}
+        cost_estimates: list[PreTradeCostEstimate] = []
+        cost_actuals: list[ActualTradingCost] = []
+        economic_decisions: list[EconomicDecision] = []
+        cost_reconciliations: list[CostReconciliation] = []
+        cost_estimate_by_order: dict[str, PreTradeCostEstimate] = {}
+        pending_buy_risk: dict[str, tuple[str, Decimal, Decimal, Decimal]] = {}
         pending_sell_risk: dict[str, tuple[str, Decimal]] = {}
+        monthly_filled_quantity: dict[tuple[int, int], Decimal] = {}
+        order_attempt_count = 0
         history: list[MarketBar] = []
         last_prices: dict[str, Decimal] = {}
         equity_curve: list[EquityPoint] = []
@@ -349,10 +398,55 @@ class BacktestEngine(Backtester):
                         order, bar, f"fill-{len(fills) + 1:06d}"
                     )
                     if fill is not None:
+                        pending_actual: ActualTradingCost | None = None
+                        pending_reconciliation: CostReconciliation | None = None
+                        if self._cost_engine is not None:
+                            estimate = cost_estimate_by_order.get(order.order_id)
+                            if estimate is None:
+                                raise BacktestConfigurationError(
+                                    "cost-aware order has no immutable PreTradeCostEstimate"
+                                )
+                            actual = self._cost_engine.actualize(fill, estimate)
+                            pending_actual = actual
+                            pending_reconciliation = self._cost_engine.reconcile(
+                                estimate, actual
+                            )
+                            components = actual.breakdown
+                            unavailable = tuple(sorted(
+                                name for name in (
+                                    "commission", "spread", "slippage", "exchange_fees",
+                                    "transaction_tax", "fx_cost", "financing_cost",
+                                    "other_variable_cost",
+                                )
+                                if getattr(components, name).status is CostStatus.UNAVAILABLE
+                            ))
+                            fill = replace(
+                                fill,
+                                commission=_fill_cost_amount(components.commission),
+                                exchange_fees=_fill_cost_amount(components.exchange_fees),
+                                transaction_tax=_fill_cost_amount(components.transaction_tax),
+                                fx_cost=_fill_cost_amount(components.fx_cost),
+                                financing_cost=_fill_cost_amount(components.financing_cost),
+                                other_variable_cost=_fill_cost_amount(components.other_variable_cost),
+                                total_variable_cost=components.amount_if_complete,
+                                cost_estimate_id=estimate.estimate_id,
+                                economic_decision_id=order.economic_decision_id,
+                                actual_cost_id=actual.actual_cost_id,
+                                unavailable_cost_components=unavailable,
+                            )
                         reason = ledger.validate_fill(fill)
                         if reason is None:
                             ledger.apply_fill(fill)
                             fills.append(fill)
+                            if pending_actual is not None:
+                                cost_actuals.append(pending_actual)
+                                assert pending_reconciliation is not None
+                                cost_reconciliations.append(pending_reconciliation)
+                                volume_key = (fill.timestamp.year, fill.timestamp.month)
+                                monthly_filled_quantity[volume_key] = (
+                                    monthly_filled_quantity.get(volume_key, Decimal("0"))
+                                    + fill.quantity
+                                )
                             order = replace(
                                 order,
                                 status=OrderStatus.FILLED,
@@ -467,6 +561,12 @@ class BacktestEngine(Backtester):
                             raise BacktestConfigurationError(
                                 "guarded intent requires an exact current regime snapshot"
                             )
+                    if (
+                        self._cost_engine is not None
+                        and signal is None
+                        and intent.signal_id is not None
+                    ):
+                        signal = self._signal_for_intent(strategy, intent)
                     ml_decision_id = None
                     if (
                         self._ml_scorer is not None
@@ -529,7 +629,8 @@ class BacktestEngine(Backtester):
                             intent,
                             quantity=activation.adjusted_quantity,
                         )
-                    order_id = f"order-{len(orders) + 1:06d}"
+                    order_attempt_count += 1
+                    order_id = f"order-{order_attempt_count:06d}"
                     observed_price = last_prices.get(intent.symbol)
                     if observed_price is None:
                         raise BacktestDataError(
@@ -547,6 +648,34 @@ class BacktestEngine(Backtester):
                         )
                     else:
                         expected_entry_price = observed_price
+                    estimate, economic_decision = self._evaluate_transaction_economics(
+                        order_id=order_id,
+                        symbol=intent.symbol,
+                        side=intent.side,
+                        quantity=intent.quantity,
+                        timestamp=bar.timestamp,
+                        reference_price=expected_entry_price,
+                        timeframe=timeframe,
+                        spread_bps=config.spread_bps,
+                        slippage_bps=config.slippage_bps,
+                        signal=signal,
+                        strategy_name=strategy.name,
+                        portfolio_plan_id=intent.portfolio_plan_id,
+                        monthly_volume_before=monthly_filled_quantity.get(
+                            (bar.timestamp.year, bar.timestamp.month), Decimal("0")
+                        ),
+                    )
+                    if estimate is not None:
+                        assert economic_decision is not None
+                        cost_estimates.append(estimate)
+                        economic_decisions.append(economic_decision)
+                        cost_estimate_by_order[order_id] = estimate
+                        warnings.extend(estimate.warnings)
+                        if (
+                            intent.side is OrderSide.BUY
+                            and not economic_decision.allows_new_risk
+                        ):
+                            continue
                     order_request = OrderRequest(
                         order_id=order_id,
                         symbol=intent.symbol,
@@ -561,6 +690,19 @@ class BacktestEngine(Backtester):
                         expected_entry_price=expected_entry_price,
                         invalidation_price=intent.invalidation_price,
                         risk_distance=intent.risk_distance,
+                        cost_estimate_id=(estimate.estimate_id if estimate else None),
+                        economic_decision_id=(
+                            economic_decision.decision_id
+                            if economic_decision is not None else None
+                        ),
+                        estimated_cash_requirement=(
+                            estimate.cash_requirement.total_cash_required
+                            if estimate is not None else None
+                        ),
+                        estimated_unit_cash_requirement=(
+                            estimate.cash_requirement.unit_cash_required
+                            if estimate is not None else None
+                        ),
                     )
                     risk_portfolio = self._portfolio_with_pending_buys(
                         ledger.snapshot(bar.timestamp, last_prices),
@@ -629,6 +771,11 @@ class BacktestEngine(Backtester):
                             ml_decision_id=ml_decision_id,
                             activation_decision_id=activation_decision_id,
                             risk_decision_id=risk_decision.decision_id,
+                            cost_estimate_id=(estimate.estimate_id if estimate else None),
+                            economic_decision_id=(
+                                economic_decision.decision_id
+                                if economic_decision is not None else None
+                            ),
                             status=OrderStatus.REJECTED,
                             status_reason=risk_decision.reason,
                             completed_at=bar.timestamp,
@@ -654,6 +801,11 @@ class BacktestEngine(Backtester):
                         ml_decision_id=ml_decision_id,
                         activation_decision_id=activation_decision_id,
                         risk_decision_id=risk_decision.decision_id,
+                        cost_estimate_id=(estimate.estimate_id if estimate else None),
+                        economic_decision_id=(
+                            economic_decision.decision_id
+                            if economic_decision is not None else None
+                        ),
                     )
                     order_indexes[order.order_id] = len(orders)
                     orders.append(order)
@@ -663,6 +815,12 @@ class BacktestEngine(Backtester):
                             order.symbol,
                             order.quantity,
                             expected_entry_price,
+                            self._reserved_cash_for_order(
+                                estimate,
+                                approved_quantity=order.quantity,
+                                requested_quantity=intent.quantity,
+                                reference_price=expected_entry_price,
+                            ),
                         )
                     else:
                         pending_sell_risk[order.order_id] = (
@@ -868,12 +1026,54 @@ class BacktestEngine(Backtester):
                         )
 
                     for proposal in plan_result.plan.orders_to_create:
-                        order_id = f"order-{len(orders) + 1:06d}"
+                        order_attempt_count += 1
+                        order_id = f"order-{order_attempt_count:06d}"
                         observed_price = last_prices.get(proposal.symbol)
                         if observed_price is None:
                             raise BacktestDataError(
                                 f"no observed close exists for portfolio sizing of {proposal.symbol}"
                             )
+                        proposal_signal = next(
+                            (
+                                item
+                                for item_strategy in strategies
+                                for item in item_strategy.signals
+                                if item.signal_id == proposal.signal_id
+                            ),
+                            None,
+                        )
+                        if proposal_signal is None:
+                            raise BacktestConfigurationError(
+                                "portfolio proposal must reference an exported strategy signal"
+                            )
+                        estimate, economic_decision = self._evaluate_transaction_economics(
+                            order_id=order_id,
+                            symbol=proposal.symbol,
+                            side=proposal.side,
+                            quantity=proposal.quantity,
+                            timestamp=timestamp,
+                            reference_price=observed_price,
+                            timeframe=proposal.timeframe,
+                            spread_bps=config.spread_bps,
+                            slippage_bps=config.slippage_bps,
+                            signal=proposal_signal,
+                            strategy_name=proposal_signal.strategy_name,
+                            portfolio_plan_id=proposal.portfolio_plan_id,
+                            monthly_volume_before=monthly_filled_quantity.get(
+                                (timestamp.year, timestamp.month), Decimal("0")
+                            ),
+                        )
+                        if estimate is not None:
+                            assert economic_decision is not None
+                            cost_estimates.append(estimate)
+                            economic_decisions.append(economic_decision)
+                            cost_estimate_by_order[order_id] = estimate
+                            warnings.extend(estimate.warnings)
+                            if (
+                                proposal.side is OrderSide.BUY
+                                and not economic_decision.allows_new_risk
+                            ):
+                                continue
                         order_request = OrderRequest(
                             order_id=order_id,
                             symbol=proposal.symbol,
@@ -887,6 +1087,19 @@ class BacktestEngine(Backtester):
                             portfolio_opportunity_ids=proposal.opportunity_ids,
                             created_at=timestamp,
                             expected_entry_price=observed_price,
+                            cost_estimate_id=(estimate.estimate_id if estimate else None),
+                            economic_decision_id=(
+                                economic_decision.decision_id
+                                if economic_decision is not None else None
+                            ),
+                            estimated_cash_requirement=(
+                                estimate.cash_requirement.total_cash_required
+                                if estimate is not None else None
+                            ),
+                            estimated_unit_cash_requirement=(
+                                estimate.cash_requirement.unit_cash_required
+                                if estimate is not None else None
+                            ),
                         )
                         risk_portfolio = self._portfolio_with_pending_buys(
                             ledger.snapshot(timestamp, last_prices),
@@ -941,6 +1154,13 @@ class BacktestEngine(Backtester):
                             "portfolio_decision_id": proposal.portfolio_decision_id,
                             "portfolio_opportunity_ids": proposal.opportunity_ids,
                             "risk_decision_id": risk_decision.decision_id,
+                            "cost_estimate_id": (
+                                estimate.estimate_id if estimate else None
+                            ),
+                            "economic_decision_id": (
+                                economic_decision.decision_id
+                                if economic_decision is not None else None
+                            ),
                         }
                         if risk_decision.status is RiskDecisionStatus.REJECT:
                             order = BacktestOrder(
@@ -967,6 +1187,12 @@ class BacktestEngine(Backtester):
                                 order.symbol,
                                 order.quantity,
                                 observed_price,
+                                self._reserved_cash_for_order(
+                                    estimate,
+                                    approved_quantity=order.quantity,
+                                    requested_quantity=proposal.quantity,
+                                    reference_price=observed_price,
+                                ),
                             )
                         else:
                             pending_sell_risk[order.order_id] = (
@@ -1026,6 +1252,37 @@ class BacktestEngine(Backtester):
                 initial_capital=config.starting_cash,
                 strategy_total_return=metrics.total_return,
             )
+
+        cost_estimate_tuple = tuple(cost_estimates)
+        cost_actual_tuple = tuple(cost_actuals)
+        economic_decision_tuple = tuple(economic_decisions)
+        cost_reconciliation_tuple = tuple(cost_reconciliations)
+        operating_costs = None
+        cost_summary = None
+        if self._cost_engine is not None:
+            operating_end = bars[-1].timestamp
+            if operating_end <= bars[0].timestamp:
+                operating_end = bars[0].timestamp + timedelta(seconds=1)
+            operating_costs = self._cost_engine.operating_costs(
+                bars[0].timestamp, operating_end
+            )
+            cost_summary = build_cost_summary(
+                engine_name=self._cost_engine.engine_name,
+                engine_version=self._cost_engine.engine_version,
+                config_hash=self._cost_engine.config_hash,
+                tariff_profile_id=self._cost_engine.tariff_profile_id,
+                tariff_status=self._cost_engine.tariff_status,
+                estimates=cost_estimate_tuple,
+                actuals=cost_actual_tuple,
+                decisions=economic_decision_tuple,
+                initial_cash=config.starting_cash,
+                final_equity=curve_tuple[-1].equity,
+                operating=operating_costs,
+            )
+            if cost_summary.cost_coverage is CostCoverage.INCOMPLETE:
+                warnings.append("VARIABLE_COST_COVERAGE_INCOMPLETE")
+            if operating_costs.total_operating_cost.status is CostStatus.UNAVAILABLE:
+                warnings.append("OPERATING_COSTS_INCOMPLETE")
 
         code_version = self._code_version
         if code_version is None:
@@ -1332,6 +1589,39 @@ class BacktestEngine(Backtester):
             "portfolio_plans": portfolio_plan_tuple,
             "portfolio_targets": portfolio_target_tuple,
             "portfolio_sleeves": portfolio_sleeve_tuple,
+            "data_quality_reports": tuple(
+                dataset.quality_report for dataset in normalized_datasets
+            ),
+            "cost_engine_name": (
+                self._cost_engine.engine_name
+                if self._cost_engine is not None else "unavailable"
+            ),
+            "cost_engine_version": (
+                self._cost_engine.engine_version
+                if self._cost_engine is not None else "0"
+            ),
+            "cost_config": (
+                self._cost_engine.config_parameters
+                if self._cost_engine is not None else ()
+            ),
+            "cost_config_hash": (
+                self._cost_engine.config_hash
+                if self._cost_engine is not None else "0" * 64
+            ),
+            "tariff_profile_id": (
+                self._cost_engine.tariff_profile_id
+                if self._cost_engine is not None else None
+            ),
+            "tariff_status": (
+                self._cost_engine.tariff_status.value
+                if self._cost_engine is not None else None
+            ),
+            "cost_estimates": cost_estimate_tuple,
+            "cost_actuals": cost_actual_tuple,
+            "economic_decisions": economic_decision_tuple,
+            "cost_reconciliations": cost_reconciliation_tuple,
+            "operating_costs": operating_costs,
+            "cost_summary": cost_summary,
         }
         run_id = f"bt-{stable_hash(run_identity)[:24]}"
         created_at = datetime.now(timezone.utc)
@@ -1422,6 +1712,39 @@ class BacktestEngine(Backtester):
             "portfolio_targets": portfolio_target_tuple,
             "portfolio_sleeves": portfolio_sleeve_tuple,
             "portfolio_metrics": portfolio_metrics,
+            "cost_engine_name": (
+                self._cost_engine.engine_name
+                if self._cost_engine is not None else "unavailable"
+            ),
+            "cost_engine_version": (
+                self._cost_engine.engine_version
+                if self._cost_engine is not None else "0"
+            ),
+            "cost_config": (
+                self._cost_engine.config_parameters
+                if self._cost_engine is not None else ()
+            ),
+            "cost_config_hash": (
+                self._cost_engine.config_hash
+                if self._cost_engine is not None else "0" * 64
+            ),
+            "tariff_profile_id": (
+                self._cost_engine.tariff_profile_id
+                if self._cost_engine is not None else None
+            ),
+            "tariff_status": (
+                self._cost_engine.tariff_status.value
+                if self._cost_engine is not None else None
+            ),
+            "cost_estimates": cost_estimate_tuple,
+            "cost_actuals": cost_actual_tuple,
+            "economic_decisions": economic_decision_tuple,
+            "cost_reconciliations": cost_reconciliation_tuple,
+            "operating_costs": operating_costs,
+            "cost_summary": cost_summary,
+            "data_quality_reports": tuple(
+                dataset.quality_report for dataset in normalized_datasets
+            ),
         }
         result_values["result_hash"] = stable_result_hash(result_values)
         return BacktestResult(**result_values)
@@ -1433,6 +1756,87 @@ class BacktestEngine(Backtester):
         order_indexes: dict[str, int],
     ) -> None:
         orders[order_indexes[order.order_id]] = order
+
+    def _evaluate_transaction_economics(
+        self,
+        *,
+        order_id: str,
+        symbol: str,
+        side: OrderSide,
+        quantity: Decimal,
+        timestamp: datetime,
+        reference_price: Decimal,
+        timeframe: str,
+        spread_bps: Decimal,
+        slippage_bps: Decimal,
+        signal: StrategySignal | None,
+        strategy_name: str,
+        portfolio_plan_id: str | None,
+        monthly_volume_before: Decimal,
+    ) -> tuple[PreTradeCostEstimate | None, EconomicDecision | None]:
+        """Estimate point-in-time economics before Risk, without future prices."""
+
+        if self._cost_engine is None:
+            return None, None
+        assert self._economic_gate is not None
+        request = PreTradeCostRequest(
+            timestamp=timestamp,
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            reference_price=reference_price,
+            timeframe=timeframe,
+            spread_bps=spread_bps,
+            slippage_bps=slippage_bps,
+            order_id=order_id,
+            signal_id=signal.signal_id if signal is not None else None,
+            portfolio_plan_id=portfolio_plan_id,
+            monthly_volume_before=monthly_volume_before,
+        )
+        estimate = self._cost_engine.estimate(request)
+        if self._expected_edge_provider is not None:
+            if signal is None:
+                raise BacktestConfigurationError(
+                    "expected-edge provider requires immutable signal lineage"
+                )
+            edge = self._expected_edge_provider(signal, estimate)
+        else:
+            edge = ExpectedEdgeEstimate.unavailable(
+                timestamp=timestamp,
+                strategy_name=strategy_name,
+                timeframe=timeframe,
+                reason="no validated point-in-time edge estimate was injected",
+            )
+        decision = self._economic_gate.evaluate(
+            estimate=estimate,
+            edge=edge,
+            signal_id=signal.signal_id if signal is not None else None,
+            is_risk_reducing_exit=side is OrderSide.SELL,
+        )
+        return estimate, decision
+
+    @staticmethod
+    def _reserved_cash_for_order(
+        estimate: PreTradeCostEstimate | None,
+        *,
+        approved_quantity: Decimal,
+        requested_quantity: Decimal,
+        reference_price: Decimal,
+    ) -> Decimal:
+        """Reserve approved notional plus the full point-in-time cost buffer."""
+
+        if (
+            estimate is None
+            or estimate.cash_requirement.coverage is CostCoverage.INCOMPLETE
+            or estimate.cash_requirement.total_cash_required is None
+        ):
+            return approved_quantity * reference_price
+        requested_notional = requested_quantity * reference_price
+        non_notional_reserve = max(
+            Decimal("0"),
+            estimate.cash_requirement.total_cash_required - requested_notional,
+        )
+        return approved_quantity * reference_price + non_notional_reserve
 
     def _scorer_for(self, strategy_name: str) -> MLScorer | None:
         if self._ml_scorers:
@@ -1568,14 +1972,14 @@ class BacktestEngine(Backtester):
     @staticmethod
     def _portfolio_with_pending_buys(
         portfolio: PortfolioSnapshot,
-        reservations: dict[str, tuple[str, Decimal, Decimal]],
+        reservations: dict[str, tuple[str, Decimal, Decimal, Decimal]],
     ) -> PortfolioSnapshot:
         quantities: dict[str, tuple[Decimal, Decimal]] = {
             item.symbol: (item.quantity, item.average_price)
             for item in portfolio.positions
         }
         reserved_cost = Decimal("0")
-        for symbol, quantity, price in reservations.values():
+        for symbol, quantity, price, reserved_cash in reservations.values():
             held, average = quantities.get(symbol, (Decimal("0"), price))
             combined = held + quantity
             combined_average = (
@@ -1584,7 +1988,7 @@ class BacktestEngine(Backtester):
                 else price
             )
             quantities[symbol] = (combined, combined_average)
-            reserved_cost += quantity * price
+            reserved_cost += reserved_cash
         return PortfolioSnapshot(
             as_of=portfolio.as_of,
             cash=max(Decimal("0"), portfolio.cash - reserved_cost),

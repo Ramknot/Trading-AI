@@ -22,6 +22,11 @@ class _OpenLot:
     commission_remaining: Decimal
     spread_remaining: Decimal
     slippage_remaining: Decimal
+    exchange_fees_remaining: Decimal
+    transaction_tax_remaining: Decimal
+    fx_cost_remaining: Decimal
+    financing_cost_remaining: Decimal
+    other_variable_cost_remaining: Decimal
 
 
 def reconstruct_trades(
@@ -61,6 +66,11 @@ def reconstruct_trades(
                     commission_remaining=fill.commission,
                     spread_remaining=fill.spread_cost,
                     slippage_remaining=fill.slippage_cost,
+                    exchange_fees_remaining=fill.exchange_fees,
+                    transaction_tax_remaining=fill.transaction_tax,
+                    fx_cost_remaining=fill.fx_cost,
+                    financing_cost_remaining=fill.financing_cost,
+                    other_variable_cost_remaining=fill.other_variable_cost,
                 )
             )
             continue
@@ -69,6 +79,11 @@ def reconstruct_trades(
         exit_commission_remaining = fill.commission
         exit_spread_remaining = fill.spread_cost
         exit_slippage_remaining = fill.slippage_cost
+        exit_exchange_remaining = fill.exchange_fees
+        exit_tax_remaining = fill.transaction_tax
+        exit_fx_remaining = fill.fx_cost
+        exit_financing_remaining = fill.financing_cost
+        exit_other_remaining = fill.other_variable_cost
         while remaining > ZERO:
             if not symbol_lots:
                 raise BacktestExecutionError(
@@ -84,8 +99,26 @@ def reconstruct_trades(
             exit_commission = exit_commission_remaining * exit_fraction
             exit_spread = exit_spread_remaining * exit_fraction
             exit_slippage = exit_slippage_remaining * exit_fraction
+            entry_exchange = lot.exchange_fees_remaining * entry_fraction
+            entry_tax = lot.transaction_tax_remaining * entry_fraction
+            entry_fx = lot.fx_cost_remaining * entry_fraction
+            entry_financing = lot.financing_cost_remaining * entry_fraction
+            entry_other = lot.other_variable_cost_remaining * entry_fraction
+            exit_exchange = exit_exchange_remaining * exit_fraction
+            exit_tax = exit_tax_remaining * exit_fraction
+            exit_fx = exit_fx_remaining * exit_fraction
+            exit_financing = exit_financing_remaining * exit_fraction
+            exit_other = exit_other_remaining * exit_fraction
             gross = (fill.price - lot.entry_price) * closed
-            fees = entry_commission + exit_commission
+            exchange = entry_exchange + exit_exchange
+            tax = entry_tax + exit_tax
+            fx = entry_fx + exit_fx
+            financing = entry_financing + exit_financing
+            other = entry_other + exit_other
+            fees = (
+                entry_commission + exit_commission + exchange + tax + fx
+                + financing + other
+            )
             net = gross - fees
             capital = lot.entry_price * closed
             trades.append(
@@ -106,15 +139,30 @@ def reconstruct_trades(
                     holding_period_seconds=(
                         fill.timestamp - lot.fill.timestamp
                     ).total_seconds(),
+                    exchange_fees=exchange,
+                    transaction_tax=tax,
+                    fx_cost=fx,
+                    financing_cost=financing,
+                    other_variable_cost=other,
                 )
             )
             lot.quantity -= closed
             lot.commission_remaining -= entry_commission
             lot.spread_remaining -= entry_spread
             lot.slippage_remaining -= entry_slippage
+            lot.exchange_fees_remaining -= entry_exchange
+            lot.transaction_tax_remaining -= entry_tax
+            lot.fx_cost_remaining -= entry_fx
+            lot.financing_cost_remaining -= entry_financing
+            lot.other_variable_cost_remaining -= entry_other
             exit_commission_remaining -= exit_commission
             exit_spread_remaining -= exit_spread
             exit_slippage_remaining -= exit_slippage
+            exit_exchange_remaining -= exit_exchange
+            exit_tax_remaining -= exit_tax
+            exit_fx_remaining -= exit_fx
+            exit_financing_remaining -= exit_financing
+            exit_other_remaining -= exit_other
             remaining -= closed
             if lot.quantity == ZERO:
                 symbol_lots.pop(0)

@@ -57,12 +57,16 @@ class MonitoringEventType(str, Enum):
     EQUITY_UPDATE = "EQUITY_UPDATE"
     SYSTEM_HEALTH = "SYSTEM_HEALTH"
     COST_ESTIMATE = "COST_ESTIMATE"
+    ECONOMIC_DECISION = "ECONOMIC_DECISION"
     COST_ACTUAL = "COST_ACTUAL"
+    COST_RECONCILIATION = "COST_RECONCILIATION"
+    VALIDATION_RESULT = "VALIDATION_RESULT"
 
 
 class CostKnowledge(str, Enum):
     KNOWN = "KNOWN"
     ESTIMATED = "ESTIMATED"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
     UNAVAILABLE = "UNAVAILABLE"
 
 
@@ -99,6 +103,10 @@ class CostComponent:
     @classmethod
     def unavailable(cls, source: str | None = None) -> CostComponent:
         return cls(CostKnowledge.UNAVAILABLE, None, source)
+
+    @classmethod
+    def not_applicable(cls, source: str) -> CostComponent:
+        return cls(CostKnowledge.NOT_APPLICABLE, ZERO, source)
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,6 +167,11 @@ class CostSnapshot:
     net_pnl_estimated: Decimal | None
     coverage_status: CostCoverageStatus
     warnings: tuple[str, ...] = ()
+    net_trading_pnl_before_operating: Decimal | None = None
+    operating_costs_total: Decimal | None = None
+    net_economic_pnl: Decimal | None = None
+    tariff_profile_id: str | None = None
+    tariff_status: str | None = None
 
     def __post_init__(self) -> None:
         _text(self.run_id, "run_id")
