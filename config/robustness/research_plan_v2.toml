@@ -1,0 +1,78 @@
+name = "balanced-robustness-research-plan"
+version = "2.0.1"
+frozen = true
+# First persisted by `robustness plan` before the one final holdout read.  This
+# provenance timestamp is excluded from the semantic plan hash so recording it
+# does not change the already-frozen criteria or holdout identity.
+frozen_at = 2026-08-30T11:18:23.061695Z
+timeframe = "1d"
+universe_kind = "CURATED_CURRENT_UNIVERSE"
+symbols = ["AAPL", "AIR.PA", "AMZN", "ASML", "GOOGL", "IWM", "MC.PA", "META", "MSFT", "NVDA", "QQQ", "SAP", "SPY"]
+strategies = ["breakout", "mean-reversion", "momentum", "trend"]
+ml_modes = ["DISABLED", "SCORE_ONLY", "FILTER_APPROVED_ONLY"]
+cost_profile = "ibkr_pro_fixed"
+validation_profile = "balanced-research-validation/1.0"
+planned_analyses = [
+  "HISTORICAL_COVERAGE_MATRIX",
+  "DECISION_FUNNEL",
+  "DRAWDOWN_EPISODES",
+  "PNL_CONCENTRATION",
+  "LEAVE_ONE_SYMBOL_OUT",
+  "WITHOUT_TOP_CONTRIBUTOR",
+  "LEAVE_ONE_STRATEGY_OUT",
+  "SINGLE_STRATEGY_COMPARISON",
+  "CALENDAR_YEAR_ROBUSTNESS",
+  "PREDECLARED_SUBPERIOD_ROBUSTNESS",
+  "REGIME_ROBUSTNESS",
+  "COST_STRESS_1X_1_25X_1_5X_2X",
+  "SYMBOL_ROBUSTNESS",
+  "STATISTICAL_UNCERTAINTY",
+  "SURVIVORSHIP_STATUS",
+  "FINAL_HOLDOUT_ADEQUACY",
+  "PAPER_READINESS_REVIEW",
+]
+
+[periods.development]
+classification = "TRAIN"
+start = 2012-05-18T00:00:00Z
+end = 2018-01-01T00:00:00Z
+
+[periods.validation]
+classification = "VALIDATION"
+start = 2018-01-01T00:00:00Z
+end = 2020-01-01T00:00:00Z
+
+[periods.consumed_diagnostic]
+classification = "CONSUMED_DIAGNOSTIC"
+start = 2020-01-01T00:00:00Z
+end = 2025-01-01T00:00:00Z
+label = "CONSUMED_DIAGNOSTIC_OOS_V1"
+
+[periods.final_holdout]
+classification = "FINAL_HOLDOUT"
+# The first eligible local market session is 2025-01-02. XPAR daily bars are
+# stamped at local midnight (23:00 UTC in winter). The end is the exclusive
+# timestamp of Yahoo's first incomplete XPAR row, so no incomplete bar is
+# repaired or retained. These boundaries were fixed from timestamp/data-quality
+# inspection before any holdout trading decision or performance was evaluated.
+start = 2025-01-01T23:00:00Z
+end = 2026-08-27T22:00:00Z
+label = "FINAL_HOLDOUT_V2_LOCAL_SESSION_FROM_2025-01-02"
+
+[periods.available_history_diagnostic]
+classification = "DIAGNOSTIC"
+start = 2000-01-01T00:00:00Z
+end = 2025-01-01T00:00:00Z
+label = "AVAILABLE_HISTORY_DIAGNOSTIC"
+
+[frozen_validation_criteria]
+minimum_closed_trades = "30"
+minimum_net_return = "0"
+minimum_net_expectancy = "0"
+minimum_profit_factor = "1.0"
+maximum_drawdown = "0.10"
+require_final_oos = "true"
+require_complete_variable_costs = "true"
+require_verified_tariff_for_period = "true"
+require_operating_costs_for_pass = "true"
+cost_stress_multipliers = "1.00,1.25,1.50,2.00"

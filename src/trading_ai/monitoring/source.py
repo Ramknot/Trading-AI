@@ -68,12 +68,22 @@ class _CacheEntry:
 
 
 class BacktestMonitoringSource(MonitoringSource):
-    """Read schemas 1.0--1.6 only after existing SHA-256 verification succeeds."""
+    """Read backtest schemas 1.0--1.6 plus linked robustness schema 1.7.
+
+    The backtest artifact itself keeps the Lot 8.1 schema.  Lot 8.2 reports
+    live in a separate, checksum-verified local store and are attached to the
+    monitoring summary without rewriting the immutable backtest export.
+    """
 
     def __init__(self, root: Path | str = Path("data_local/backtests")) -> None:
         self.root = Path(root)
         self.result_store = BacktestResultStore(self.root)
         self.validation_store = LocalValidationStore(self.root.parent / "validation")
+        # Imported lazily to avoid coupling monitoring module import order to
+        # the analytical Lot 8.2 application service.
+        from trading_ai.robustness.storage import LocalRobustnessStore
+
+        self.robustness_store = LocalRobustnessStore(self.root.parent / "robustness")
         self._cache: dict[str, _CacheEntry] = {}
         self.parquet_parse_count = 0
 
@@ -124,6 +134,9 @@ class BacktestMonitoringSource(MonitoringSource):
             latest_validation = self.validation_store.latest_for_run(run_id)
             if latest_validation is not None:
                 summary["validation"] = redact_sensitive(latest_validation)
+            latest_robustness = self.robustness_store.latest_for_run(run_id)
+            if latest_robustness is not None:
+                summary["robustness"] = redact_sensitive(latest_robustness)
             checksums_bytes = (directory / "checksums.json").read_bytes()
             fingerprint = hashlib.sha256(checksums_bytes).hexdigest()
             cache_token = self.cache_token(run_id)
@@ -187,6 +200,7 @@ class BacktestMonitoringSource(MonitoringSource):
                     "checksum_manifest": hashlib.sha256(checksum_bytes).hexdigest(),
                     "files": metadata,
                     "validation": self.validation_store.latest_for_run(run_id),
+                    "robustness": self.robustness_store.latest_for_run(run_id),
                 }
             )
         except FileNotFoundError as exc:

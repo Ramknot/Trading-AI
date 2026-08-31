@@ -97,6 +97,14 @@ class BacktestViewBuilder:
             if isinstance(summary.get("validation"), dict)
             else {"status": "UNAVAILABLE"}
         )
+        robustness = (
+            summary.get("robustness")
+            if isinstance(summary.get("robustness"), dict)
+            else {
+                "status": "UNAVAILABLE",
+                "reason": "no Lot 8.2 robustness report is attached to this run",
+            }
+        )
         data_quality = self._data_quality(summary)
         decisions = self._decisions(tables)
         traces = [to_primitive(item) for item in self.build_traces(data)]
@@ -171,6 +179,7 @@ class BacktestViewBuilder:
             "data_quality": data_quality,
             "costs": to_primitive(costs),
             "validation": validation,
+            "robustness": robustness,
             "decisions": decisions,
             "decision_traces": traces,
             "health": to_primitive(health),

@@ -1,0 +1,17 @@
+name = "balanced-robustness"
+version = "1.0"
+enabled = true
+baseline_manifest = "config/robustness/research_baseline_v1.toml"
+research_plan = "config/robustness/research_plan_v2.toml"
+
+# These diagnostic controls were declared before the V2 holdout is read.  They
+# do not replace or relax config/validation/balanced.toml.
+minimum_holdout_calendar_days = 365
+minimum_bootstrap_samples = 30
+bootstrap_resamples = 2000
+bootstrap_seed = 8202
+drawdown_episode_min_fraction = "0.01"
+concentration_warning_fraction = "0.75"
+temporal_concentration_warning_fraction = "0.75"
+survivorship_policy = "WARN_UNRESOLVED"
+curated_universe_status = "CURATED_CURRENT_UNIVERSE"

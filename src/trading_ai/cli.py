@@ -96,6 +96,12 @@ from trading_ai.strategies.config import (
     TrendConfig,
 )
 from trading_ai.strategies.registry import BASELINE_STRATEGIES
+from trading_ai.robustness import (
+    PeriodClassification,
+    RobustnessService,
+    load_historical_cost_evidence,
+)
+from trading_ai.robustness.exceptions import RobustnessError
 from trading_ai.validation import (
     LocalValidationStore,
     ResearchValidationGate,
@@ -518,6 +524,70 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validation_inspect.add_argument("--validation-id", required=True)
     _add_store_arguments(validation_inspect)
+    validation_holdout = validation_commands.add_parser(
+        "holdout-status", help="inspect the frozen V2 final-holdout lifecycle"
+    )
+    _add_store_arguments(validation_holdout)
+    validation_readiness = validation_commands.add_parser(
+        "paper-readiness", help="inspect a read-only Paper readiness review"
+    )
+    validation_readiness.add_argument("--report-id", required=True)
+    _add_store_arguments(validation_readiness)
+
+    robustness_parser = commands.add_parser(
+        "robustness", help="run frozen Lot 8.2 diagnostics without retuning"
+    )
+    robustness_commands = robustness_parser.add_subparsers(
+        dest="robustness_command", required=True
+    )
+    robustness_plan = robustness_commands.add_parser(
+        "plan", help="freeze and inspect the predeclared research plan"
+    )
+    _add_store_arguments(robustness_plan)
+    robustness_run = robustness_commands.add_parser(
+        "run", help="analyze one checksum-verified backtest export"
+    )
+    robustness_run.add_argument("--run-id", required=True)
+    robustness_run.add_argument(
+        "--period-classification",
+        choices=("CONSUMED_DIAGNOSTIC", "DIAGNOSTIC", "FINAL_HOLDOUT"),
+        required=True,
+    )
+    robustness_run.add_argument(
+        "--without-symbol",
+        action="append",
+        default=[],
+        metavar="SYMBOL=RUN_ID",
+        help="attach one precomputed post-hoc leave-one-symbol-out run",
+    )
+    robustness_run.add_argument(
+        "--without-strategy",
+        action="append",
+        default=[],
+        metavar="STRATEGY=RUN_ID",
+        help="attach one precomputed post-hoc leave-one-strategy-out run",
+    )
+    robustness_run.add_argument(
+        "--single-strategy",
+        action="append",
+        default=[],
+        metavar="STRATEGY=RUN_ID",
+        help="attach one precomputed frozen single-strategy comparison run",
+    )
+    _add_store_arguments(robustness_run)
+    robustness_inspect = robustness_commands.add_parser(
+        "inspect", help="verify and inspect a stored robustness report"
+    )
+    robustness_inspect.add_argument("--report-id", required=True)
+    _add_store_arguments(robustness_inspect)
+    robustness_compare = robustness_commands.add_parser(
+        "compare", help="report precomputed leave-one-out runs without selection"
+    )
+    robustness_compare.add_argument("--run-id", required=True)
+    robustness_compare.add_argument("--without-symbol", action="append", default=[])
+    robustness_compare.add_argument("--without-strategy", action="append", default=[])
+    robustness_compare.add_argument("--single-strategy", action="append", default=[])
+    _add_store_arguments(robustness_compare)
 
     dashboard_parser = commands.add_parser(
         "dashboard", help="serve or inspect the local read-only observability UI"
@@ -896,6 +966,25 @@ def _run_costs(args: argparse.Namespace) -> int:
                     ),
                 }
             )
+            evidence = load_historical_cost_evidence()
+            payload["historical_evidence"] = {
+                "registry_hash": evidence.registry_hash,
+                "broker_tariffs": [
+                    {
+                        "profile": item.subject,
+                        "status": item.status.value,
+                        "evidence_kind": item.evidence_kind.value,
+                        "source": item.source_reference,
+                        "warning": item.warning,
+                    }
+                    for item in evidence.broker_tariffs
+                ],
+                "tax_rate_periods": len(evidence.tax_rates),
+                "annual_tax_eligibility_records": len(evidence.tax_eligibility),
+                "exchange_fees": evidence.exchange_fee_status.value,
+                "fx_cost": evidence.fx_cost_status.value,
+                "operating_scenarios": [name for name, _ in evidence.operating_scenarios],
+            }
         print(_render_payload(payload, args.as_json))
         return 0
     if args.costs_command == "estimate":
@@ -923,6 +1012,17 @@ def _run_costs(args: argparse.Namespace) -> int:
 
 def _run_validation(args: argparse.Namespace) -> int:
     store = LocalValidationStore(args.data_root / "validation")
+    if args.validation_command == "holdout-status":
+        print(
+            _render_payload(
+                RobustnessService(args.data_root).holdout_status(), args.as_json
+            )
+        )
+        return 0
+    if args.validation_command == "paper-readiness":
+        payload = RobustnessService(args.data_root).inspect(args.report_id)
+        print(_render_payload(payload["paper_readiness"], args.as_json))
+        return 0
     if args.validation_command == "inspect":
         print(_render_payload(store.inspect(args.validation_id), args.as_json))
         return 0
@@ -951,6 +1051,50 @@ def _run_validation(args: argparse.Namespace) -> int:
     raise AssertionError(
         f"unhandled validation command: {args.validation_command}"
     )
+
+
+def _parse_run_mapping(values: Sequence[str], name: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for raw in values:
+        if "=" not in raw:
+            raise ValueError(f"{name} values must use ITEM=RUN_ID")
+        item, run_id = raw.split("=", 1)
+        if not item or not run_id or item in result:
+            raise ValueError(f"invalid or duplicate {name} value")
+        result[item] = run_id
+    return result
+
+
+def _run_robustness(args: argparse.Namespace) -> int:
+    service = RobustnessService(args.data_root)
+    if args.robustness_command == "plan":
+        print(_render_payload(service.freeze_plan(), args.as_json))
+        return 0
+    if args.robustness_command == "inspect":
+        print(_render_payload(service.inspect(args.report_id), args.as_json))
+        return 0
+    if args.robustness_command in {"run", "compare"}:
+        classification = (
+            PeriodClassification(args.period_classification)
+            if args.robustness_command == "run"
+            else PeriodClassification.DIAGNOSTIC
+        )
+        payload = service.run(
+            args.run_id,
+            period_classification=classification,
+            leave_one_symbol_run_ids=_parse_run_mapping(
+                args.without_symbol, "--without-symbol"
+            ),
+            leave_one_strategy_run_ids=_parse_run_mapping(
+                args.without_strategy, "--without-strategy"
+            ),
+            single_strategy_run_ids=_parse_run_mapping(
+                args.single_strategy, "--single-strategy"
+            ),
+        )
+        print(_render_payload(payload, args.as_json))
+        return 0
+    raise AssertionError(f"unhandled robustness command: {args.robustness_command}")
 
 
 def _regime_snapshot_payload(snapshot) -> dict[str, Any]:
@@ -1553,6 +1697,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_costs(args)
         if args.command == "validation":
             return _run_validation(args)
+        if args.command == "robustness":
+            return _run_robustness(args)
         if args.command == "dashboard":
             return _run_dashboard(args)
         if args.command == "monitoring":
@@ -1565,6 +1711,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         MonitoringError,
         CostError,
         ValidationError,
+        RobustnessError,
         TradingAIError,
         ValueError,
     ) as exc:

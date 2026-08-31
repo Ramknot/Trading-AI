@@ -567,6 +567,58 @@ The controlled Lot 8.1 campaign used checksum-verified Yahoo daily data for all 
 
 Transaction costs reduce measured performance and cash capacity; their estimates can still differ from real execution. Validation gates reduce research error; they do not eliminate market risk or guarantee profitability.
 
+## Real-data robustness and holdout governance
+
+Lot 8.2 freezes the Lot 8.1 research state before performing any remediation analysis. `ResearchBaselineManifest` records the exact commit/source hash, result hash, dataset and corporate-action checksums, Feature/Regime/Strategy/ML/Policy/Portfolio/Risk/Cost/Validation hashes, tariff evidence, period, and original `FAIL`. The 2020-01-01 through 2025-01-01 observation is permanently labelled `CONSUMED_DIAGNOSTIC_OOS_V1`: it can be reproduced and diagnosed, but it is not a fresh final test after any decision-changing modification. Its immutable causes remain the historically unverified tariff, 16 rather than 30 closed trades, and 11.23% rather than at most 10% drawdown. Roughly 79% of positive realized P&L came from AAPL, which is a fragility warning, not a reason to delete AAPL after the fact.
+
+`RobustnessResearchPlan` V2.0.1 is frozen and SHA-256 hashed before the final holdout is evaluated. It retains the original thresholds and configurations and predeclares coverage, funnel, drawdown, concentration, leave-one-out, temporal, regime, cost-stress, uncertainty, survivorship, holdout-adequacy, and readiness analyses. Holdouts move only through `UNTOUCHED`, `CONSUMED`, and `INVALIDATED`. The first final evaluation consumes the holdout; an identical rerun is permitted only for reproducibility. A changed decision-core/config hash makes the consumed period ineligible as new final evidence. Training, expected-edge calibration, configuration selection, and ML promotion are forbidden consumers of an untouched or consumed final holdout.
+
+The V2 holdout uses the first complete common local session after V1 through the last complete common session observed before evaluation. UTC boundaries account for XPAR daily bars stamped at local midnight; incomplete provider rows are rejected rather than repaired. `INSUFFICIENT_HOLDOUT_EVIDENCE` remains the only valid outcome if duration or the frozen 30-trade minimum is not met. A completed Lot 8.2 implementation does not imply a passing campaign.
+
+The frozen V2 holdout was consumed once for 2025-01-02 through the last complete common session before 2026-08-28. Run `bt-db4b176497845f51c77f10c8` closed 38 trades, returned 10.88% net before operating costs, recorded 3.37% backtest max drawdown, profit factor 3.03, and net expectancy 202.94 in account currency. These figures are reported, not used for retuning. Report `robustness-32a8615bf46fc13c64fda98e` retains `FAIL` because the unchanged Validation Gate rejects the historically unverified broker tariff; operating economics and point-in-time universe membership also remain incomplete. The resulting Paper Readiness status is therefore `NOT_READY`, and no broker, Paper, or `LIVE` capability is enabled.
+
+### Diagnostics, not retuning
+
+The read-only robustness layer consumes checksum-verified exports and never participates in signal, sizing, economics, Risk, or execution. It produces:
+
+- a monotone decision funnel from candidate entry through ML, Activation Policy, Portfolio, Economic Gate, Risk, fill, and closed trade, with exits reported separately;
+- drawdown episodes with peak, trough, recovery, duration, held symbols, observed realized contributors, regimes, Risk states/decisions, exposure, and costs;
+- per-symbol gains/losses/trades/exposure plus top-1/top-3 positive-P&L share and HHI;
+- calendar-year and predeclared chronological subperiod reports, with empty periods explicitly unavailable;
+- regime-conditioned entry/trade observations only where exported lineage permits them;
+- baseline, +25%, +50%, and +100% variable-cost stress, cost/trade, cost/notional, cost/gross-profit, and estimate-versus-actual error;
+- fixed-seed non-parametric uncertainty only when sample size is adequate; small samples remain `INSUFFICIENT_FOR_RELIABLE_CI`;
+- leave-one-symbol-out and leave-one-strategy-out as `POST_HOC_ROBUSTNESS_DIAGNOSTIC`, never as universe/strategy selection or automatic sleeve reallocation;
+- single-strategy comparisons on the same frozen data, costs, Regime Policy, and Risk assumptions; they preserve the explicit legacy one-strategy construction path and never reallocate the fixed multi-strategy sleeves.
+
+For the consumed V1 run, report `robustness-62a4b3d15f52d5fa505d676d` reconstructs 2,329 candidate entry signals, 284 activation-eligible candidates, 41 Portfolio selections, nine Risk-approved/reduced entry orders, and nine filled entries, followed by 16 closed trades. The 11.23% drawdown crossed the unchanged hard 10% limit in September 2020, latched Risk to `HALTED` for new exposure, and explains why subsequent candidate activity did not create a larger independent trade sample. This is a causal audit of exported decisions, not a justification to relax the Risk threshold.
+
+The `HistoricalCoverageMatrix` reports each symbol/timeframe’s actual first/last bar, row count, DataQuality, checksums, corporate-action coverage, common coverage, and provider limitations. `AVAILABLE_HISTORY_DIAGNOSTIC` and a coverage-derived common-history campaign are kept separate. Histories with inconsistent OHLCV remain rejected or explicitly partial; timeframes are never pooled to manufacture the trade minimum.
+
+The controlled coverage probe requested daily history from 2000 without relaxing validation. Eight symbols (`AAPL`, `AMZN`, `ASML`, `MSFT`, `NVDA`, `QQQ`, `SAP`, `SPY`) had valid coverage from 2000-01-03, `IWM` from 2000-05-26, `GOOGL` from 2004-08-19, and `META` from 2012-05-18. The longer `MC.PA` response contained eight invalid 2000 OHLC bars and the longer `AIR.PA` response one invalid 2008 OHLC bar; those responses were rejected rather than silently repaired. The predeclared common-history diagnostic consequently begins with the latest required history in May 2012 and keeps provider/calendar warnings visible. Run `bt-8ed3bd4def50a1e903608c4f` closed 397 trades through 2024, returned 357.90% net before operating costs, and recorded 7.60% maximum drawdown. Report `robustness-f1bb985fb77718c3166886e7` is deliberately `WARNING`, not final evidence: `MC.PA`/`AIR.PA` retain calendar-quality warnings, historical tariff proof and operating costs are incomplete, and survivorship bias remains unresolved. Intraday histories are not pooled with daily results.
+
+### Historical cost and universe evidence
+
+Historical evidence distinguishes a current official source from an archived official source. The current official IBKR schedule remains `HISTORICAL_TARIFF_UNVERIFIED` for retrospective runs unless a dated official/archive artifact proves the applicable schedule; `CURRENT_TARIFF_APPLIED_RETROSPECTIVELY` is always disclosed. French FTT uses dated official rates and explicit annual official eligibility records rather than ticker suffixes. Unknown exchange/pass-through or FX evidence remains `UNAVAILABLE`, never zero. `LOCAL_RESEARCH`, `PAPER_ESTIMATE`, and `LIVE_ESTIMATE` operating-cost scenarios keep market data, server/VPS, software, and other fixed costs separate and source-provenanced. `VARIABLE_COST_COMPLETE`, `OPERATING_COST_COMPLETE`, `COMPLETE_ESTIMATED`, and `COMPLETE_VERIFIED` are distinct claims.
+
+`PointInTimeUniverse` and dated `UniverseMembership` contracts prepare a future unbiased membership campaign, but the configured 13-symbol run remains `CURATED_CURRENT_UNIVERSE` with `SURVIVORSHIP_BIAS_UNRESOLVED`. Leave-one-out does not retroactively redefine it.
+
+`PaperReadinessReport` is read-only and returns `READY_FOR_REVIEW`, `NOT_READY`, or `INSUFFICIENT_EVIDENCE`. It combines the unchanged ValidationGate status, holdout adequacy, historical cost evidence, operating-cost completeness, concentration, uncertainty, and survivorship warnings. It never enables a broker, Paper, or `LIVE`.
+
+Robustness commands are explicit and offline once datasets/runs exist:
+
+```powershell
+trading-ai robustness plan --json
+trading-ai robustness run --run-id bt-example --period-classification CONSUMED_DIAGNOSTIC --json
+trading-ai robustness inspect --report-id robustness-example --json
+trading-ai robustness compare --run-id bt-example --without-symbol AAPL=bt-without-aapl --json
+trading-ai robustness compare --run-id bt-example --single-strategy trend=bt-trend-only --json
+trading-ai validation holdout-status --json
+trading-ai validation paper-readiness --report-id robustness-example --json
+```
+
+The local Dashboard adds a read-only Robustness view for the frozen baseline, consumed OOS, final-holdout lifecycle, decision funnel, drawdowns, temporal/symbol concentration, leave-one-out completeness, historical cost evidence, survivorship, and Paper readiness. Older schemas remain readable and show unavailable Lot 8.2 fields rather than invented values.
+
 ## CLI
 
 Safety diagnostics remain available:
@@ -649,7 +701,7 @@ Training replays the selected quant baseline without ML to build candidate examp
 
 ## Tests and CI
 
-The default suite is deterministic, fast, and independent of Yahoo Finance and the network. It uses `FakeDataProvider` plus synthetic sessions, invalid bars, gaps, corporate actions, feature/regime warm-ups, future-append invariance, exact-timestamp relative strength, all four baselines, two-axis classification, confirmation/transitions, activation matrices, Mean Reversion eligibility/exits/no-averaging, monotonic ML/policy/portfolio/risk sizing, chronological labels/splits/purge/embargo, all three tabular adapters, registry integrity/lifecycle, inference modes, multi-strategy batching/netting/diversification/turnover/FX, current-close sizing, fee-aware pending reservations, fixed/tiered/proportional/capped commissions, dated tax/FX/operating-cost states, Economic Gate behavior, OOS/stress/robustness validation, shared-ledger Risk integration, backward-compatible tamper-evident exports, immutable monitoring events, SQLite round trips, all Dashboard API/UI sections, schemas 1.0–1.6, path traversal/corruption refusal, full cost/decision lineage, local-only serving, and architecture audits. Synthetic patterns validate mechanics only; they are not evidence of market edge or profitability.
+The default suite is deterministic, fast, and independent of Yahoo Finance and the network. It uses `FakeDataProvider` plus synthetic sessions, invalid bars, gaps, corporate actions, feature/regime warm-ups, future-append invariance, exact-timestamp relative strength, all four baselines, two-axis classification, confirmation/transitions, activation matrices, Mean Reversion eligibility/exits/no-averaging, monotonic ML/policy/portfolio/risk sizing, chronological labels/splits/purge/embargo, all three tabular adapters, registry integrity/lifecycle, inference modes, multi-strategy batching/netting/diversification/turnover/FX, current-close sizing, fee-aware pending reservations, fixed/tiered/proportional/capped commissions, dated tax/FX/operating-cost states, Economic Gate behavior, OOS/stress/robustness validation, frozen-baseline/holdout governance, decision-funnel/drawdown/concentration/temporal/cost/uncertainty diagnostics, point-in-time universe contracts, shared-ledger Risk integration, backward-compatible tamper-evident exports, immutable monitoring events, SQLite round trips, all Dashboard API/UI sections, schemas 1.0–1.7, path traversal/corruption refusal, full cost/decision lineage, local-only serving, and architecture audits. Synthetic patterns validate mechanics only; they are not evidence of market edge or profitability.
 
 ```powershell
 .\.venv\Scripts\python -m compileall -q src
@@ -680,4 +732,4 @@ Expected safety matrix:
 
 ## Roadmap
 
-Lots 0 through 8.1 now provide foundations, universe/CI alignment, historical data, deterministic simulation, shared Feature Engine 1.1, four quantitative research baselines, the offline Balanced Risk Engine, two-axis rule-based regime classification, governed tabular ML scoring, deterministic multi-strategy portfolio construction, a local read-only Dashboard/observability boundary, and configuration-driven transaction economics plus a research Validation Gate. The next planned stages are Lot 9 — Broker / Paper Trading; Lot 10 — Balanced Paper Validation; and Lot 11 — Limited Live. Neural, sequence, multimodal, real-time, and online-learning research remains PLANNED / LOCKED, and Aggressive Research remains LOCKED. See `PROJECT_STATE.md` for the authoritative status and the separate real-data campaign outcome.
+Lots 0 through 8.2 now provide foundations, universe/CI alignment, historical data, deterministic simulation, shared Feature Engine 1.1, four quantitative research baselines, the offline Balanced Risk Engine, two-axis rule-based regime classification, governed tabular ML scoring, deterministic multi-strategy portfolio construction, a local read-only Dashboard/observability boundary, configuration-driven transaction economics plus a research Validation Gate, and frozen real-data robustness/holdout governance. The next planned stages are Lot 9 — Broker / Paper Trading; Lot 10 — Balanced Paper Validation; and Lot 11 — Limited Live. Neural, sequence, multimodal, real-time, and online-learning research remains PLANNED / LOCKED, and Aggressive Research remains LOCKED. See `PROJECT_STATE.md` for the authoritative implementation, campaign, and readiness statuses.

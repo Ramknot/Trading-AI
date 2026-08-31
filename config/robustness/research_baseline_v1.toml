@@ -1,0 +1,119 @@
+name = "lot-8.1-real-data-baseline"
+version = "1.0"
+frozen_at = 2026-08-30T05:37:51Z
+commit_sha = "726884401cf2984e0ecdf16e4a098956dbf9a667"
+source_hash_sha256 = "382d1e972bcc2d8ea101cf4ab7dd1e7c850896904725043a1266ccd11c0257af"
+run_id = "bt-14c60c4eb1126f4b81300c92"
+result_hash = "8b623ec016c09cfbc9c0e28964a7018961a9b81dbf684588d081eb64c1471819"
+validation_id = "validation-b0bc57f80f409c7dfd444c1a"
+validation_status = "FAIL"
+period_classification = "CONSUMED_DIAGNOSTIC"
+period_label = "CONSUMED_DIAGNOSTIC_OOS_V1"
+period_start = 2020-01-01T00:00:00Z
+period_end = 2025-01-01T00:00:00Z
+timeframe = "1d"
+universe_kind = "CURATED_CURRENT_UNIVERSE"
+symbols = ["AAPL", "AIR.PA", "AMZN", "ASML", "GOOGL", "IWM", "MC.PA", "META", "MSFT", "NVDA", "QQQ", "SAP", "SPY"]
+tariff_profile_id = "ibkr_pro_fixed"
+tariff_status = "VERIFIED"
+tariff_period_verified = false
+tariff_config_hash = "af32bcc0974b25b6d2a93fcb77229c802bd4d6bff6147f86ecf24350e6a9ec70"
+closed_trades = 16
+max_drawdown = "0.11230253162955747"
+net_return_before_operating = "0.4329790579621315"
+top_contributor = "AAPL"
+top_contributor_share = "0.7904181718561413"
+warnings = ["HISTORICAL_TARIFF_UNVERIFIED", "OPERATING_COSTS_INCOMPLETE", "SYMBOL_RESULT_CONCENTRATION", "SURVIVORSHIP_BIAS_NOT_RESOLVED"]
+
+[config_hashes]
+backtest = "c158b0e92e0f8c72aaffdd61bcce71ac3f8257329f4981564dcd453a53a6ac26"
+cost = "aaa837ca53cdef4b35eaf29ec15b1e28051a8655c2b3fba6a222862e2644985b"
+datasets = "8d1470b689103cd54bc7452d7ec4c9fe9cd5f3e5bbf6d8a816662f6c54fdee44"
+feature = "a58f81f21a50171f3bb822887b46338e0a6b3b5cccdd471bf91b236e7b65bda9"
+ml = "7fe6c90c36b6367e1a6f0fd502ae7b4f759ebef4a45cb832f1d48234c22bde4b"
+policy = "2f5895385fcade03b8bed6e4e34f64d50b52a271fbf122eb0753c6038535960f"
+portfolio = "0621516507064c755a24d290124b3771b261fa2aeaf6c003f245742327092465"
+profile = "cdb1d0c4cb2d6150601411c96b736e74f0bedda20989b3a727c42c33957c60da"
+regime = "3f5c4af06f25cf049345509bd4ce0dba4466377a940349ade35109f297bd8dff"
+risk = "3de88c4d10023990b660bcddd65f7ffeabaf81c31cf16091775dca641f93626f"
+strategy = "cd5ed15b679b7446d386f76239041b5b32d6458d639f3a7f985b93f08dbfde5b"
+validation = "67f66d216c706c177cc190e0c4f41db93ad1f1530ce9f5cdd13502f539c60842"
+
+[[datasets]]
+symbol = "AAPL"
+dataset_id = "e35e0e4632e4e2db48d93ab0"
+checksum = "c028f25832cd95a4561691b48aa07e89bc82b6b0c6477bc42557c124c27bf363"
+corporate_actions_dataset_id = "2bf27eab72c5d7ff40776f1f"
+corporate_actions_checksum = "a2c0dbde8cd198c0b1904ab159618ebba306a24af705ae7f57cde0f5dff79526"
+[[datasets]]
+symbol = "AIR.PA"
+dataset_id = "2108442a4e1a35ceeed5e7d8"
+checksum = "8a4e8690dc349a1a3604a3bd3202027f1a37e5c3c5d23b756e60089cc21f9b05"
+corporate_actions_dataset_id = "fa3403240d2a420c83163b27"
+corporate_actions_checksum = "a94070462f8bd73de0a51836be81f3e78cc2d39d5d5c62f6fcd7d2e85f0adf25"
+[[datasets]]
+symbol = "AMZN"
+dataset_id = "72149cf924bb87501457283c"
+checksum = "7628957cb63360f56d57f2d70c93d8db6ef55b2a6eba23ceb0bb6eefcdf400cb"
+corporate_actions_dataset_id = "df74334356fcc3b23797572d"
+corporate_actions_checksum = "f0b69448f61048ac377e4f53b46e3f902e6c14f1afe78b463e17a3951dd9e035"
+[[datasets]]
+symbol = "ASML"
+dataset_id = "03af1fa1c5109d685ff60af0"
+checksum = "840e35dd2554414a492f0a249aed63e8b6df4aae67557706c2bd75013676a457"
+corporate_actions_dataset_id = "af93b31a792fac8751e686a8"
+corporate_actions_checksum = "f1e06c5500e33051b360143720eb786d9d36034ccf6e0bf3b94959659600e358"
+[[datasets]]
+symbol = "GOOGL"
+dataset_id = "51bd669b3870ef1397e21c6c"
+checksum = "609795ca82e912168cd7c7caccd7681a1c36629a4b150aa30180f416ffce3a5d"
+corporate_actions_dataset_id = "81205fc46fa96ae8a9e5cb8f"
+corporate_actions_checksum = "9d7057c23b029a1f2120835f11cb7212a8fdb2941d46fb7244318a87d5a519f3"
+[[datasets]]
+symbol = "IWM"
+dataset_id = "91613d1632ad5ab24613fca7"
+checksum = "ba24c0a1a2ea432f1333da58ab480a59cf9a9640f59459239271dd5d4b8375db"
+corporate_actions_dataset_id = "f3a342b809858da2f60f9471"
+corporate_actions_checksum = "2db82ffc783bb77405d2f21cae7bee05a90f9bcf30abf4bb4e547366d2fa3a04"
+[[datasets]]
+symbol = "MC.PA"
+dataset_id = "287e933605616aad04147ffb"
+checksum = "951d4ddb433119533798d8baeb6ec2c3adf178112a660e3594ce12ccf8d60bc9"
+corporate_actions_dataset_id = "6974f8339ba6b0360e41016c"
+corporate_actions_checksum = "5d2b9a8634296d11dd420b009dac67c55e213370a5f22e4332625dfe034b7a51"
+[[datasets]]
+symbol = "META"
+dataset_id = "c0c2f583973ea84e49a28f82"
+checksum = "8eb16980758b47f92004e7a83250260047b6c237bedb3eefb283b38394d03c6b"
+corporate_actions_dataset_id = "4093d7db4d1737b67a2dbf0a"
+corporate_actions_checksum = "9974de7cf2277c37f0b93de85992051ee48e5327caebdf0ffd94ee9d21c45f55"
+[[datasets]]
+symbol = "MSFT"
+dataset_id = "cb7276aa26b403b0107151b4"
+checksum = "817097846dbec62cc8bcae16c8d4b8a427d4a11d0ee9697e1b56ce075331f853"
+corporate_actions_dataset_id = "d9f276915b19ec450a3856d6"
+corporate_actions_checksum = "e99458c80caa87c6a449e39ae7aaae68eb7af5b9f5db128f02329c8cbf7b3f94"
+[[datasets]]
+symbol = "NVDA"
+dataset_id = "875758b394e4850dd7c4eaa4"
+checksum = "e408f83e1d3fbae0a8984828ea4397c508406ab63b7e2b8556b8d6dc745406bb"
+corporate_actions_dataset_id = "3f5991af45548c282de06ea2"
+corporate_actions_checksum = "a58e02fa11db772fb213773586cec2e55be08736b0a43f0876ebbceeae23de7d"
+[[datasets]]
+symbol = "QQQ"
+dataset_id = "e9971e46a26c0c2dba384ffc"
+checksum = "4ee4ae4b66333ebb75472ef08abbf0b49c5bb8a46b242d04ec722df12a75107b"
+corporate_actions_dataset_id = "0dbb72a3ea932f419c683601"
+corporate_actions_checksum = "2f7184d1d391057142592a3f62a46fdb4012f7386038b221cf1b71d6d8c8f2eb"
+[[datasets]]
+symbol = "SAP"
+dataset_id = "4cd09615886bd7518f44a5b1"
+checksum = "9ae1484634f23fbdd1e5a4487825de62c0d4a97f50f3374467414f07b0a5c739"
+corporate_actions_dataset_id = "013e35a54b568400049b44b8"
+corporate_actions_checksum = "a504b0a6702ce4b49619795f859ef2d53e9deba98e21a100cf9b6f77e37e6a80"
+[[datasets]]
+symbol = "SPY"
+dataset_id = "787a51c4f463d2f3f7065409"
+checksum = "851c6f76e3ea28d390c3a0c43c1470baded88d2a11483d188fc4fc2927923b6c"
+corporate_actions_dataset_id = "c5b7bcdc2b21e51c46c665c6"
+corporate_actions_checksum = "d00fec32c304b314bb7e5414e0ad1c34e5a3917b26328f57af287cc2eb1dfc7b"

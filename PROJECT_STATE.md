@@ -13,7 +13,11 @@
 - Lot 7 — Multi-Strategy Portfolio Engine: DONE
 - Lot 8 — Dashboard & Observability: DONE
 - Lot 8.1 — Validation Gate & Transaction Cost Economics: DONE
-- Real Data Validation Campaign: FAIL
+- Lot 8.2 — Real Data Robustness & Validation Remediation: DONE
+- Real Data Validation Campaign V1: FAIL
+- Extended Historical Campaign: WARNING
+- Final Holdout V2: FAIL
+- Paper Readiness Review: NOT_READY
 - Lot 9 — Broker / Paper Trading: TODO
 - Lot 10 — Balanced Paper Validation: TODO
 - Lot 11 — Limited Live: TODO
@@ -67,3 +71,7 @@ Delivered: immutable UTC monitoring events/snapshots, health and decision-trace 
 Delivered: `BalancedTransactionCostEngine` 1.0 with dated, versioned, source-provenanced and SHA-256-hashed tariff/tax/instrument configurations; explicit KNOWN/ESTIMATED/NOT_APPLICABLE/UNAVAILABLE commission, spread, slippage, exchange, tax, FX, financing, other-variable, and operating-cost states; point-in-time entry/round-trip estimates, cost-aware cash and pending reservations, realized-cost ledger debits, reconciliation, and anti-double-count controls; a separate expected-edge contract and fail-closed `EconomicGate`; schema 1.6 lineage/exports and Dashboard monitoring; local CSV/Parquet historical ingestion; immutable `ResearchValidationGate` reports with OOS, integrity, cost coverage, tariff-period, sample, net metric, drawdown, cash, circuit-breaker, stress, subperiod, and symbol-concentration checks; offline Cost/Validation CLI commands and regression/security tests. No broker, Paper/`LIVE` unlock, neural network, stream, online learning, or test-driven threshold optimization was added.
 
 The controlled real-data campaign used all 13 configured Balanced symbols at `1d` from 2020-01-01 through 2025-01-01 with checksum-verified Yahoo datasets and strict TLS verification. Dataset integrity and DataQuality passed, but the immutable campaign result is `FAIL`: the current IBKR reference tariff is not historically verified for the tested dates, only 16 trades closed versus the predeclared minimum of 30, and observed drawdown reached 11.23% versus the 10% limit. Operating costs remain unavailable and the configured universe still carries `SURVIVORSHIP_BIAS_NOT_RESOLVED`. This result does not unlock Paper or `LIVE`.
+
+## Lot 8.2 delivery summary
+
+Delivered: an immutable manifest reproducing the consumed Lot 8.1 baseline and a pre-evaluation hashed V2 research plan; tamper-evident `UNTOUCHED`/`CONSUMED`/`INVALIDATED` holdout governance; read-only coverage, decision-funnel, drawdown, symbol-concentration, yearly/subperiod, regime, cost-stress, deterministic uncertainty, leave-one-symbol-out, leave-one-strategy-out, and single-strategy diagnostics; dated official French FTT evidence plus explicit historical-broker-tariff and operating-cost incompleteness; point-in-time universe contracts with unresolved-survivorship disclosure; schema 1.7 robustness exports, CLI, Dashboard, and Paper-readiness review. The consumed V1 remains `FAIL`. The 2012–2025 common-history diagnostic is `WARNING` (397 trades, 7.60% maximum drawdown) because it is diagnostic data with incomplete historical economics and survivorship evidence. The frozen 2025–2026 V2 holdout is `CONSUMED` and `FAIL`: its 38 trades, 10.88% net return before operating costs, and 3.37% drawdown satisfy the unchanged sample/performance/Risk checks, but the unchanged tariff-period criterion fails. Paper readiness remains `NOT_READY`; no threshold was relaxed and no broker, Paper, or `LIVE` path was added.

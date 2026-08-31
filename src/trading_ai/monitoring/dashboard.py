@@ -146,6 +146,7 @@ def create_dashboard_app(
         ("data-quality", "data_quality"),
         ("costs", "costs"),
         ("validation", "validation"),
+        ("robustness", "robustness"),
         ("health", "health"),
     ):
         app.add_api_route(

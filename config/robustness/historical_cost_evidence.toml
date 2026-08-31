@@ -1,0 +1,230 @@
+version = "1.0"
+currency = "USD"
+verified_at = 2026-08-30T00:00:00Z
+
+# This evidence registry is analytical.  It does not overwrite the frozen Lot
+# 8.1 execution assumptions and never turns a current tariff into historical
+# proof.  URLs are official sources; archived BOFiP versions are explicitly
+# labelled as such.
+
+[[broker_tariffs]]
+profile_id = "ibkr_pro_fixed"
+period_start = 2020-01-01T00:00:00Z
+period_end = 2026-08-30T00:00:00Z
+status = "HISTORICAL_TARIFF_UNVERIFIED"
+evidence_kind = "CURRENT_OFFICIAL_SOURCE"
+source_name = "Interactive Brokers commissions"
+source_reference = "https://www.interactivebrokers.com/en/pricing/commissions-stocks.php"
+warning = "CURRENT_TARIFF_APPLIED_RETROSPECTIVELY"
+
+[[tax_rates]]
+rule_id = "france_ftt_2017_2025q1"
+rate_bps = "30"
+period_start = 2020-01-01T00:00:00Z
+period_end = 2025-04-01T00:00:00Z
+status = "VERIFIED"
+evidence_kind = "ARCHIVED_OFFICIAL_SOURCE"
+source_name = "BOFiP — 2017 FTT rate change"
+source_reference = "https://bofip.impots.gouv.fr/bofip/10831-PGP.html/identifiant=ACTU-2017-00089"
+
+[[tax_rates]]
+rule_id = "france_ftt_from_2025q2"
+rate_bps = "40"
+period_start = 2025-04-01T00:00:00Z
+period_end = 2026-08-30T00:00:00Z
+status = "VERIFIED"
+evidence_kind = "CURRENT_OFFICIAL_SOURCE"
+source_name = "BOFiP — FTT rate from 1 April 2025"
+source_reference = "https://bofip.impots.gouv.fr/bofip/7575-PGP.html/identifiant=BOI-TCA-FIN-10-30-20250528"
+
+# Eligibility is annual and explicit.  MC.PA maps to LVMH. AIR.PA maps to
+# Airbus SE, which is absent from each exhaustive French-headquartered list.
+# This is configuration metadata, never inference from the ticker suffix.
+[[tax_eligibility]]
+symbol = "MC.PA"
+issuer = "LVMH"
+period_start = 2020-01-01T00:00:00Z
+period_end = 2021-01-01T00:00:00Z
+eligible = true
+status = "VERIFIED"
+evidence_kind = "ARCHIVED_OFFICIAL_SOURCE"
+source_reference = "https://bofip.impots.gouv.fr/bofip/9789-PGP.html/identifiant=BOI-ANNX-000467-20191218"
+
+[[tax_eligibility]]
+symbol = "AIR.PA"
+issuer = "Airbus SE"
+period_start = 2020-01-01T00:00:00Z
+period_end = 2021-01-01T00:00:00Z
+eligible = false
+status = "VERIFIED"
+evidence_kind = "ARCHIVED_OFFICIAL_SOURCE"
+source_reference = "https://bofip.impots.gouv.fr/bofip/9789-PGP.html/identifiant=BOI-ANNX-000467-20191218"
+
+[[tax_eligibility]]
+symbol = "MC.PA"
+issuer = "LVMH"
+period_start = 2021-01-01T00:00:00Z
+period_end = 2022-01-01T00:00:00Z
+eligible = true
+status = "VERIFIED"
+evidence_kind = "ARCHIVED_OFFICIAL_SOURCE"
+source_reference = "https://bofip.impots.gouv.fr/bofip/9789-PGP.html/identifiant=BOI-ANNX-000467-20201223"
+
+[[tax_eligibility]]
+symbol = "AIR.PA"
+issuer = "Airbus SE"
+period_start = 2021-01-01T00:00:00Z
+period_end = 2022-01-01T00:00:00Z
+eligible = false
+status = "VERIFIED"
+evidence_kind = "ARCHIVED_OFFICIAL_SOURCE"
+source_reference = "https://bofip.impots.gouv.fr/bofip/9789-PGP.html/identifiant=BOI-ANNX-000467-20201223"
+
+[[tax_eligibility]]
+symbol = "MC.PA"
+issuer = "LVMH"
+period_start = 2022-01-01T00:00:00Z
+period_end = 2023-01-01T00:00:00Z
+eligible = true
+status = "VERIFIED"
+evidence_kind = "ARCHIVED_OFFICIAL_SOURCE"
+source_reference = "https://bofip.impots.gouv.fr/bofip/9789-PGP.html/identifiant=BOI-ANNX-000467-20211229"
+
+[[tax_eligibility]]
+symbol = "AIR.PA"
+issuer = "Airbus SE"
+period_start = 2022-01-01T00:00:00Z
+period_end = 2023-01-01T00:00:00Z
+eligible = false
+status = "VERIFIED"
+evidence_kind = "ARCHIVED_OFFICIAL_SOURCE"
+source_reference = "https://bofip.impots.gouv.fr/bofip/9789-PGP.html/identifiant=BOI-ANNX-000467-20211229"
+
+[[tax_eligibility]]
+symbol = "MC.PA"
+issuer = "LVMH"
+period_start = 2023-01-01T00:00:00Z
+period_end = 2024-01-01T00:00:00Z
+eligible = true
+status = "VERIFIED"
+evidence_kind = "ARCHIVED_OFFICIAL_SOURCE"
+source_reference = "https://bofip.impots.gouv.fr/bofip/9789-PGP.html/identifiant=BOI-ANNX-000467-20221221"
+
+[[tax_eligibility]]
+symbol = "AIR.PA"
+issuer = "Airbus SE"
+period_start = 2023-01-01T00:00:00Z
+period_end = 2024-01-01T00:00:00Z
+eligible = false
+status = "VERIFIED"
+evidence_kind = "ARCHIVED_OFFICIAL_SOURCE"
+source_reference = "https://bofip.impots.gouv.fr/bofip/9789-PGP.html/identifiant=BOI-ANNX-000467-20221221"
+
+[[tax_eligibility]]
+symbol = "MC.PA"
+issuer = "LVMH"
+period_start = 2024-01-01T00:00:00Z
+period_end = 2025-01-01T00:00:00Z
+eligible = true
+status = "VERIFIED"
+evidence_kind = "ARCHIVED_OFFICIAL_SOURCE"
+source_reference = "https://bofip.impots.gouv.fr/bofip/9789-PGP.html/identifiant=BOI-ANNX-000467-20231220"
+
+[[tax_eligibility]]
+symbol = "AIR.PA"
+issuer = "Airbus SE"
+period_start = 2024-01-01T00:00:00Z
+period_end = 2025-01-01T00:00:00Z
+eligible = false
+status = "VERIFIED"
+evidence_kind = "ARCHIVED_OFFICIAL_SOURCE"
+source_reference = "https://bofip.impots.gouv.fr/bofip/9789-PGP.html/identifiant=BOI-ANNX-000467-20231220"
+
+[[tax_eligibility]]
+symbol = "MC.PA"
+issuer = "LVMH"
+period_start = 2025-01-01T00:00:00Z
+period_end = 2026-01-01T00:00:00Z
+eligible = true
+status = "VERIFIED"
+evidence_kind = "ARCHIVED_OFFICIAL_SOURCE"
+source_reference = "https://bofip.impots.gouv.fr/bofip/9789-PGP.html/identifiant=BOI-ANNX-000467-20241223"
+
+[[tax_eligibility]]
+symbol = "AIR.PA"
+issuer = "Airbus SE"
+period_start = 2025-01-01T00:00:00Z
+period_end = 2026-01-01T00:00:00Z
+eligible = false
+status = "VERIFIED"
+evidence_kind = "ARCHIVED_OFFICIAL_SOURCE"
+source_reference = "https://bofip.impots.gouv.fr/bofip/9789-PGP.html/identifiant=BOI-ANNX-000467-20241223"
+
+[[tax_eligibility]]
+symbol = "MC.PA"
+issuer = "LVMH"
+period_start = 2026-01-01T00:00:00Z
+period_end = 2027-01-01T00:00:00Z
+eligible = true
+status = "VERIFIED"
+evidence_kind = "CURRENT_OFFICIAL_SOURCE"
+source_reference = "https://bofip.impots.gouv.fr/bofip/9789-PGP.html/identifiant=BOI-ANNX-000467-20251217"
+
+[[tax_eligibility]]
+symbol = "AIR.PA"
+issuer = "Airbus SE"
+period_start = 2026-01-01T00:00:00Z
+period_end = 2027-01-01T00:00:00Z
+eligible = false
+status = "VERIFIED"
+evidence_kind = "CURRENT_OFFICIAL_SOURCE"
+source_reference = "https://bofip.impots.gouv.fr/bofip/9789-PGP.html/identifiant=BOI-ANNX-000467-20251217"
+
+[exchange_fees]
+status = "UNAVAILABLE"
+source_reference = "No verified historical venue/pass-through schedule for all Balanced markets"
+
+[fx_cost]
+status = "ESTIMATED"
+source_reference = "Frozen Lot 8.1 configuration; historical execution-specific FX tariff remains unverified"
+
+[operating_scenarios.LOCAL_RESEARCH.market_data_subscription]
+status = "UNAVAILABLE"
+source_reference = "No historical subscription invoices supplied"
+[operating_scenarios.LOCAL_RESEARCH.server_vps]
+status = "NOT_APPLICABLE"
+amount = "0"
+source_reference = "Local research execution; no VPS used"
+[operating_scenarios.LOCAL_RESEARCH.software_subscription]
+status = "NOT_APPLICABLE"
+amount = "0"
+source_reference = "Repository software has no declared subscription cost"
+[operating_scenarios.LOCAL_RESEARCH.other_fixed_cost]
+status = "UNAVAILABLE"
+source_reference = "Electricity and hardware amortisation not evidenced"
+
+[operating_scenarios.PAPER_ESTIMATE.market_data_subscription]
+status = "UNAVAILABLE"
+source_reference = "Paper market-data subscription not selected"
+[operating_scenarios.PAPER_ESTIMATE.server_vps]
+status = "UNAVAILABLE"
+source_reference = "Paper deployment host not selected"
+[operating_scenarios.PAPER_ESTIMATE.software_subscription]
+status = "UNAVAILABLE"
+source_reference = "Paper subscriptions not selected"
+[operating_scenarios.PAPER_ESTIMATE.other_fixed_cost]
+status = "UNAVAILABLE"
+source_reference = "Paper fixed costs not selected"
+
+[operating_scenarios.LIVE_ESTIMATE.market_data_subscription]
+status = "UNAVAILABLE"
+source_reference = "LIVE remains locked; no subscription selected"
+[operating_scenarios.LIVE_ESTIMATE.server_vps]
+status = "UNAVAILABLE"
+source_reference = "LIVE remains locked; no deployment selected"
+[operating_scenarios.LIVE_ESTIMATE.software_subscription]
+status = "UNAVAILABLE"
+source_reference = "LIVE remains locked; no subscriptions selected"
+[operating_scenarios.LIVE_ESTIMATE.other_fixed_cost]
+status = "UNAVAILABLE"
+source_reference = "LIVE remains locked; no fixed costs selected"

@@ -112,4 +112,12 @@ These rules apply to Codex and every future development agent working in this re
 - A Validation Gate `PASS` is a research status only and must never unlock Paper, `LIVE`, a broker, or profile activation.
 - Applying a current tariff retrospectively must be disclosed and must not be represented as historically verified.
 - TLS certificate verification must never be disabled; `verify=False` and equivalent certificate bypasses are forbidden.
+- Once an out-of-sample period has been observed, it becomes consumed diagnostic data and must not be presented as a fresh final test after decision-changing work.
+- Failed Validation or Risk thresholds must never be relaxed after observing a TEST/OOS result.
+- Robustness diagnostics must remain read-only and must never mutate Strategy, Feature, Regime, ML, Policy, Portfolio, Risk, Cost, Economic Gate, or Validation configuration.
+- Leave-one-symbol-out and leave-one-strategy-out are post-hoc diagnostics, never automatic universe selection, strategy selection, or capital reallocation.
+- A final holdout and all decision/config hashes must be frozen before its first evaluation; insufficient holdout evidence must remain insufficient.
+- A correctness bug fix that changes decision semantics invalidates prior comparability and requires genuinely new final evidence.
+- Training, preprocessing, edge calibration, threshold selection, and model promotion must never inspect an untouched final holdout.
+- Paper readiness is a read-only review status and must never auto-enable a broker, Paper session, or `LIVE`.
 - Update `PROJECT_STATE.md` when a lot changes state.

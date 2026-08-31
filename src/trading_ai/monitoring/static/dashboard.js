@@ -222,6 +222,44 @@ function renderValidation(data) {
   ]);
 }
 
+function renderRobustness(data) {
+  const readiness = data.paper_readiness || {};
+  const concentration = data.concentration || {};
+  const cost = data.cost_robustness || {};
+  renderMetrics(byId("robustness-summary"), {
+    status: data.campaign_status || data.status,
+    period: data.period_classification,
+    baseline_reproduced: data.baseline_reproduced,
+    plan_hash: data.plan_hash,
+    holdout_status: data.holdout_status || "NOT_RUN",
+    paper_readiness: readiness.status || "UNAVAILABLE",
+    top_contributor: concentration.top_contributor,
+    top1_share: concentration.top1_positive_pnl_share,
+    historical_tariff: cost.historical_tariff_status,
+    survivorship: data.survivorship_status,
+  });
+  renderTable(byId("robustness-funnel"), (data.decision_funnel || {}).rows || [], [
+    ["Strategy", "strategy_name"], ["Symbol", "symbol"], ["Candidates", "candidate_entries"],
+    ["Policy eligible", "activation_eligible"], ["Portfolio", "portfolio_selected"],
+    ["Risk approved", "risk_approved"], ["Fills", "filled_entries"], ["Trades", "closed_trades"],
+  ]);
+  renderDetails(byId("robustness-warnings"), {warnings: (data.warnings || []).join(" · ") || "UNAVAILABLE"});
+  renderTable(byId("robustness-temporal"), data.temporal_rows || [], [
+    ["Period", "label"], ["Status", "availability", "badge"], ["Net return", "net_return"],
+    ["Trades", "closed_trades"], ["Drawdown", "max_drawdown"], ["Costs", "variable_costs"],
+  ]);
+  const comparisons = [
+    ...(data.leave_one_symbol_out || []),
+    ...(data.leave_one_strategy_out || []),
+    ...(data.single_strategy_runs || []),
+  ];
+  renderTable(byId("robustness-loso"), comparisons, [
+    ["Diagnostic", "diagnostic_type"], ["Excluded", "excluded_item"],
+    ["Availability", "availability", "badge"], ["Net return", "net_return"],
+    ["Drawdown", "max_drawdown"], ["Trades", "closed_trades"],
+  ]);
+}
+
 function renderHealth(data) {
   const cards = (data.components || []).map((item) => {
     const card = document.createElement("article"); card.className = "health-card";
@@ -268,17 +306,17 @@ async function loadRun(runId) {
   if (!runId) return;
   try {
     const params = `run_id=${encodeURIComponent(runId)}`;
-    const [overview, equity, portfolio, strategies, regimes, ml, risk, dataQuality, costs, validation, health, snapshot] = await Promise.all([
+    const [overview, equity, portfolio, strategies, regimes, ml, risk, dataQuality, costs, validation, robustness, health, snapshot] = await Promise.all([
       fetchJson(`/api/v1/overview?${params}`), fetchJson(`/api/v1/equity?${params}`),
       fetchJson(`/api/v1/portfolio?${params}`), fetchJson(`/api/v1/strategies?${params}`),
       fetchJson(`/api/v1/regimes?${params}`), fetchJson(`/api/v1/ml?${params}`),
       fetchJson(`/api/v1/risk?${params}`), fetchJson(`/api/v1/data-quality?${params}`),
-      fetchJson(`/api/v1/costs?${params}`), fetchJson(`/api/v1/validation?${params}`), fetchJson(`/api/v1/health?${params}`),
+      fetchJson(`/api/v1/costs?${params}`), fetchJson(`/api/v1/validation?${params}`), fetchJson(`/api/v1/robustness?${params}`), fetchJson(`/api/v1/health?${params}`),
       fetchJson(`/api/v1/snapshot?${params}`),
     ]);
     renderOverview(overview); renderChart(equity); renderDetails(byId("equity-metrics"), equity.metrics || {});
     renderPortfolio(portfolio); renderStrategies(strategies); renderRegimes(regimes); renderMl(ml);
-    renderRisk(risk); renderData(dataQuality); renderCosts(costs); renderValidation(validation); renderHealth(health);
+    renderRisk(risk); renderData(dataQuality); renderCosts(costs); renderValidation(validation); renderRobustness(robustness); renderHealth(health);
     const traceSelect = byId("trace-select");
     const traces = snapshot.decision_traces || [];
     traceSelect.replaceChildren();
