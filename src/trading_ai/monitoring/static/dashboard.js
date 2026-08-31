@@ -261,21 +261,28 @@ function renderRobustness(data) {
 }
 
 function renderPaperReadiness(data) {
-  const review = data.paper_readiness_v2 || {};
+  const review = data.paper_readiness_v3 || data.paper_readiness_v2 || {};
   const completeness = data.economic_completeness || {};
   const tariff = data.broker_tariff || {};
-  const operating = data.paper_economics || data.paper_operating_scenario || {};
+  const operating = data.paper_operating_scenario || data.paper_economics || {};
+  const metrics = data.metrics || {};
+  const human = data.human_review || {};
+  const components = completeness.components || (completeness.component_statuses || []).map((item) => ({component: item[0], status: item[1]}));
   renderMetrics(byId("paper-readiness-summary"), {
     readiness: review.status || "UNAVAILABLE",
     holdout_status: data.holdout_status || "UNAVAILABLE",
-    reassessment_mode: data.mode || "UNAVAILABLE",
+    recomputation: data.assessment_status || data.mode || "UNAVAILABLE",
     tariff_compatibility: tariff.status || "UNAVAILABLE",
     economic_completeness: completeness.status || "UNAVAILABLE",
     decision_invariance: (data.decision_invariance || {}).status || "UNAVAILABLE",
     cost_invariance: (data.cost_invariance || {}).status || "UNAVAILABLE",
+    affected_sells: metrics.affected_fills,
+    section31: metrics.recomputed_section31,
+    pnl_delta: metrics.pnl_delta,
+    human_review: human.status || review.human_review_status || "UNAVAILABLE",
     unlocks_paper_or_live: review.unlocks_paper_or_live,
   });
-  renderTable(byId("evidence-components"), completeness.components || [], [
+  renderTable(byId("evidence-components"), components, [
     ["Component", "component"], ["Status", "status", "badge"],
     ["Compatibility", "compatibility"], ["Original", "amount_in_original_run"],
     ["Missing indicated", "indicated_missing_amount"], ["Reason", "reason"],
@@ -286,9 +293,14 @@ function renderPaperReadiness(data) {
     period_central: operating.operating_central,
     period_high: operating.operating_high,
     net_before_operating: operating.net_before_operating,
-    net_after_central: operating.net_after_operating_central,
-    break_even_monthly_fixed: operating.break_even_monthly_fixed_cost,
+    net_after_central: operating.net_after_central || operating.net_after_operating_central,
+    break_even_monthly_fixed: operating.break_even_fixed_monthly || operating.break_even_monthly_fixed_cost,
   });
+  renderTable(byId("section31-fills"), data.affected_fills || [], [
+    ["Symbol", "symbol"], ["Timestamp", "timestamp"], ["Notional", "notional"],
+    ["Rate/million", "rate_per_million"], ["Section 31", "section31_cost"],
+    ["Recomputed total", "recomputed_total_variable_cost"],
+  ]);
   renderTable(byId("paper-readiness-criteria"), review.criteria || [], [
     ["Criterion", "name"], ["Status", "status", "badge"],
     ["Observed", "observed"], ["Required", "required"], ["Reason", "reason"],

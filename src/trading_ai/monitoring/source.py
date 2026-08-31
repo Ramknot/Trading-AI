@@ -68,7 +68,7 @@ class _CacheEntry:
 
 
 class BacktestMonitoringSource(MonitoringSource):
-    """Read backtest 1.0--1.6 and linked robustness/evidence 1.7--1.8.
+    """Read backtest 1.0--1.6 and linked analytical bundles 1.7--1.9.
 
     The backtest artifact itself keeps the Lot 8.1 schema.  Lot 8.2 reports
     live in a separate, checksum-verified local store and are attached to the
@@ -140,6 +140,13 @@ class BacktestMonitoringSource(MonitoringSource):
             latest_evidence = self.robustness_store.latest_evidence_for_run(run_id)
             if latest_evidence is not None:
                 summary["evidence"] = redact_sensitive(latest_evidence)
+            latest_recomputation = self.robustness_store.latest_recomputation_for_run(
+                run_id
+            )
+            if latest_recomputation is not None:
+                summary["economic_recomputation"] = redact_sensitive(
+                    latest_recomputation
+                )
             checksums_bytes = (directory / "checksums.json").read_bytes()
             fingerprint = hashlib.sha256(checksums_bytes).hexdigest()
             cache_token = self.cache_token(run_id)
@@ -205,6 +212,9 @@ class BacktestMonitoringSource(MonitoringSource):
                     "validation": self.validation_store.latest_for_run(run_id),
                     "robustness": self.robustness_store.latest_for_run(run_id),
                     "evidence": self.robustness_store.latest_evidence_for_run(run_id),
+                    "economic_recomputation": (
+                        self.robustness_store.latest_recomputation_for_run(run_id)
+                    ),
                 }
             )
         except FileNotFoundError as exc:
@@ -367,6 +377,77 @@ class BacktestMonitoringSource(MonitoringSource):
                         payload_json=json.dumps(
                             to_primitive(payload_value), sort_keys=True,
                             separators=(",", ":"), allow_nan=False,
+                        ),
+                        status=status,
+                    )
+                )
+        recomputation = summary.get("economic_recomputation")
+        if isinstance(recomputation, dict) and recomputation.get("recomputation_id"):
+            timestamp = datetime.fromisoformat(
+                str(recomputation.get("created_at")).replace("Z", "+00:00")
+            ).astimezone(timezone.utc)
+            invariance = recomputation.get("decision_invariance") or {}
+            readiness = recomputation.get("paper_readiness_v3") or {}
+            human = recomputation.get("human_review") or {}
+            event_specs = (
+                (
+                    MonitoringEventType.ECONOMIC_RECOMPUTATION_STARTED,
+                    str(recomputation["recomputation_id"]),
+                    "CONSUMED_HOLDOUT",
+                    {"period_label": recomputation.get("period_label")},
+                ),
+                (
+                    MonitoringEventType.ECONOMIC_RECOMPUTATION_COMPLETED,
+                    str(recomputation["recomputation_id"]),
+                    str(recomputation.get("assessment_status", "UNAVAILABLE")),
+                    recomputation,
+                ),
+                (
+                    MonitoringEventType.DECISION_INVARIANCE_CHECK,
+                    (
+                        f"{recomputation['recomputation_id']}:"
+                        f"{invariance.get('report_hash', 'UNAVAILABLE')}"
+                    ),
+                    str(invariance.get("status", "UNAVAILABLE")),
+                    invariance,
+                ),
+                (
+                    MonitoringEventType.PAPER_READINESS_V3,
+                    str(readiness.get("readiness_id", "UNAVAILABLE")),
+                    str(readiness.get("status", "UNAVAILABLE")),
+                    readiness,
+                ),
+                (
+                    MonitoringEventType.HUMAN_READINESS_REVIEW,
+                    str(human.get("review_event_id", "UNAVAILABLE")),
+                    str(human.get("status", "UNAVAILABLE")),
+                    human,
+                ),
+            )
+            for event_type, entity_id, status, payload_value in event_specs:
+                event_timestamp = timestamp
+                if event_type is MonitoringEventType.HUMAN_READINESS_REVIEW and human.get(
+                    "recorded_at"
+                ):
+                    event_timestamp = datetime.fromisoformat(
+                        str(human["recorded_at"]).replace("Z", "+00:00")
+                    ).astimezone(timezone.utc)
+                events.append(
+                    MonitoringEvent(
+                        event_id=f"{data.run_id}:{event_type.value}:{entity_id}",
+                        timestamp=event_timestamp,
+                        event_type=event_type,
+                        run_id=data.run_id,
+                        session_id=data.run_id,
+                        source_component="EconomicRecomputation",
+                        component_version="1.0",
+                        related_ids=(("recomputation_id", str(recomputation["recomputation_id"])),),
+                        provenance=provenance,
+                        payload_json=json.dumps(
+                            to_primitive(payload_value),
+                            sort_keys=True,
+                            separators=(",", ":"),
+                            allow_nan=False,
                         ),
                         status=status,
                     )

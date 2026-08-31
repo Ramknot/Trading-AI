@@ -106,12 +106,15 @@ class BacktestViewBuilder:
             }
         )
         paper_readiness = (
-            summary.get("evidence")
+            summary.get("economic_recomputation")
+            if isinstance(summary.get("economic_recomputation"), dict)
+            else summary.get("evidence")
             if isinstance(summary.get("evidence"), dict)
             else {
                 "status": "UNAVAILABLE",
-                "reason": "no checksum-verified Lot 8.3 evidence reassessment is attached",
+                "reason": "no checksum-verified Lot 8.3/8.4 analytical bundle is attached",
                 "paper_readiness_v2": {"status": "UNAVAILABLE"},
+                "paper_readiness_v3": {"status": "UNAVAILABLE"},
             }
         )
         data_quality = self._data_quality(summary)

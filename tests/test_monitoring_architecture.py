@@ -5,6 +5,7 @@ from pathlib import Path
 
 from trading_ai.monitoring.models import MonitoringEventType
 from trading_ai.monitoring.security import redact_sensitive
+from trading_ai.monitoring.source import BacktestMonitoringData, BacktestMonitoringSource
 
 
 def test_monitoring_event_contract_reserves_all_engine_event_types() -> None:
@@ -16,6 +17,9 @@ def test_monitoring_event_contract_reserves_all_engine_event_types() -> None:
         "ECONOMIC_DECISION", "COST_RECONCILIATION", "VALIDATION_RESULT",
         "EVIDENCE_VERIFIED", "EVIDENCE_CONFLICT", "EVIDENCE_REASSESSMENT",
         "PAPER_READINESS_REVIEW",
+        "ECONOMIC_RECOMPUTATION_STARTED", "ECONOMIC_RECOMPUTATION_COMPLETED",
+        "DECISION_INVARIANCE_CHECK", "PAPER_READINESS_V3",
+        "HUMAN_READINESS_REVIEW",
     }
 
 
@@ -68,3 +72,42 @@ def test_observability_redacts_secret_shaped_fields_before_rendering() -> None:
         "access_token": "[REDACTED]",
         "nested": {"broker-password": "[REDACTED]"},
     }
+
+
+def test_decision_invariance_event_identity_is_scoped_to_recomputation() -> None:
+    def event_id(recomputation_id: str) -> str:
+        data = BacktestMonitoringData(
+            run_id="bt-monitoring-fixture",
+            schema_version="1.6",
+            source_fingerprint="a" * 64,
+            cache_token="b" * 64,
+            summary={
+                "result_hash": "c" * 64,
+                "economic_recomputation": {
+                    "recomputation_id": recomputation_id,
+                    "created_at": "2026-08-31T00:00:00+00:00",
+                    "assessment_status": "PASS",
+                    "decision_invariance": {
+                        "report_hash": "d" * 64,
+                        "status": "STRICTLY_INVARIANT",
+                    },
+                    "paper_readiness_v3": {
+                        "readiness_id": f"readiness-{recomputation_id}",
+                        "status": "READY_FOR_REVIEW",
+                    },
+                    "human_review": {
+                        "review_event_id": f"human-{recomputation_id}",
+                        "recorded_at": "2026-08-31T00:00:00+00:00",
+                        "status": "AWAITING_HUMAN_REVIEW",
+                    },
+                },
+            },
+            tables={},
+        )
+        return next(
+            item.event_id
+            for item in BacktestMonitoringSource.events_for_data(data)
+            if item.event_type is MonitoringEventType.DECISION_INVARIANCE_CHECK
+        )
+
+    assert event_id("recompute-a") != event_id("recompute-b")

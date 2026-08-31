@@ -15,11 +15,16 @@
 - Lot 8.1 — Validation Gate & Transaction Cost Economics: DONE
 - Lot 8.2 — Real Data Robustness & Validation Remediation: DONE
 - Lot 8.3 — Evidence Closure & Paper Readiness: DONE
+- Lot 8.4 — Economic Recomputation & Human Paper Readiness Review: DONE
 - Real Data Validation Campaign V1: FAIL
 - Extended Historical Campaign: WARNING
 - Final Holdout V2: FAIL / CONSUMED
 - Holdout V2 Evidence Reassessment: FAIL
 - Paper Readiness Review V2: NOT_READY
+- Holdout V2 Economic Recomputation: PASS
+- Decision Invariance: STRICTLY_INVARIANT
+- Paper Readiness Review V3: READY_FOR_REVIEW
+- Human Review: AWAITING_HUMAN_REVIEW
 - Lot 9 — Broker / Paper Trading: TODO
 - Lot 10 — Balanced Paper Validation: TODO
 - Lot 11 — Limited Live: TODO
@@ -81,3 +86,7 @@ Delivered: an immutable manifest reproducing the consumed Lot 8.1 baseline and a
 ## Lot 8.3 delivery summary
 
 Delivered: immutable Evidence Registry V2 contracts with official/current/historical/archived/regulatory source classes, dated scope and stable SHA-256 provenance; deterministic exact-match, mathematically conservative, numerically-different, conflict, market, plan, and date-gap tariff assessments; strict decision-core and numeric-cost invariance checks; evidence-only versus economic-recomputation classification; schema 1.8 evidence bundles with tamper-evident checksums; retrospective `PAPER_ESTIMATE_V1` operating-cost ranges and break-even diagnostics; `EconomicEvidenceCompleteness` and read-only `PaperReadinessReviewV2`; offline Evidence/Validation CLI and Dashboard views. Official archived IBKR evidence confirms the modeled US Fixed commission for the consumed holdout, but official IBKR/SEC evidence also identifies a separately applicable Section 31 sell fee that was not debited in the original run. The outcome is therefore `ECONOMIC_RECOMPUTATION_REQUIRED`, evidence reassessment `FAIL`, economic completeness `INCOMPLETE`, and Paper readiness `NOT_READY`. All trading decisions, quantities, fills, and original numeric costs remain unchanged and auditable; the V2 holdout remains `CONSUMED`, no threshold or decision parameter was modified, and no broker, Paper, or `LIVE` path was added.
+
+## Lot 8.4 delivery summary
+
+Delivered: a separately versioned `balanced-economic-recomputation / 1.1` model reading verified, dated SEC Section 31 rules exclusively from `EvidenceRegistryV2`; point-in-time entry/exit applicability and anti-double-count safeguards; immutable per-fill/trade/ledger/equity reconciliation; frozen Validation-config hash enforcement; independent Feature/Regime/Signal/ML/Activation/Portfolio/Economic/Risk/Order/Fill invariance hashes; schema 1.9 checksum-verified analytical bundles; recalculated net economics and unchanged `PAPER_ESTIMATE_V1` ranges; read-only `PaperReadinessReviewV3`; explicit reason-required human-review audit; CLI, monitoring events, and Dashboard visibility. The consumed holdout has eight covered post-effective-date US sells and USD 0.99650280 of Section 31 cost, reducing net P&L before operating costs from USD 10,881.80249268745 to USD 10,880.80598988745. Decision invariance is `STRICTLY_INVARIANT`, all unchanged hard checks remain passing, completeness is `COMPLETE_ESTIMATED`, and Readiness V3 is `READY_FOR_REVIEW`; however the original Final Holdout V2 remains historically `FAIL / CONSUMED`, the prior evidence/readiness statuses remain unchanged, and Human Review remains `AWAITING_HUMAN_REVIEW`. No parameter was retuned and no broker, Paper session, order transmission, credential, or `LIVE` path was added.

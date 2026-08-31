@@ -237,7 +237,7 @@ def test_dashboard_html_is_responsive_escaped_and_has_no_trading_controls(
     html = response.text
     for section in (
         "Overview", "Portfolio", "Strategies", "Regimes", "ML", "Risk",
-        "Data Quality", "Costs", "Robustness", "Paper Readiness V2",
+        "Data Quality", "Costs", "Robustness", "Paper Readiness V3",
         "System Health", "Decision Trace",
     ):
         assert section in html

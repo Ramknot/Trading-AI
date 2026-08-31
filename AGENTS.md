@@ -127,4 +127,11 @@ These rules apply to Codex and every future development agent working in this re
 - Conflicting official evidence must remain unresolved until dates, market, plan, and fee scope are reconciled explicitly.
 - Paper readiness is not Live readiness; `READY_FOR_REVIEW` never auto-enables a broker, Paper session, or `LIVE`.
 - Evidence acquisition and reassessment must never retune Strategy, Feature, Regime, ML, Policy, Portfolio, Risk, Cost, Economic Gate, or Validation parameters.
+- Economic recomputation of consumed evidence must never relabel the period as fresh OOS.
+- Regulatory fees must be applied from provenance-driven rules according to their point-in-time effective dates.
+- Original backtest and evidence exports are immutable; recomputation must create a separate linked artifact.
+- Decision invariance must be proven before a recomputed consumed holdout can support Paper-readiness review.
+- Human readiness approval may authorize only Lot 9 development and must never enable a broker, Paper session, or `LIVE`.
+- Human readiness review requires an explicit, immutable, audited reason.
+- Readiness metrics must never auto-approve progression; generated reviews remain `AWAITING_HUMAN_REVIEW` until a separate human action.
 - Update `PROJECT_STATE.md` when a lot changes state.

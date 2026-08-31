@@ -22,7 +22,8 @@ from trading_ai.robustness.models import (
 
 ROBUSTNESS_EXPORT_SCHEMA_VERSION = "1.7"
 EVIDENCE_EXPORT_SCHEMA_VERSION = "1.8"
-_SUPPORTED_ROBUSTNESS_SCHEMAS = {"1.7", "1.8"}
+ECONOMIC_RECOMPUTATION_SCHEMA_VERSION = "1.9"
+_SUPPORTED_ROBUSTNESS_SCHEMAS = {"1.7", "1.8", "1.9"}
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
@@ -268,6 +269,35 @@ class LocalRobustnessStore:
             ),
         }
 
+    def inspect_report_bundle(self, report_id: str) -> dict[str, Any]:
+        """Verify and return all governance records linked to one report."""
+
+        directory = self._safe_directory("reports", report_id)
+        manifest = self._verify_files(directory)
+        report = json.loads(
+            (directory / "robustness_report.json").read_text(encoding="utf-8")
+        )
+        return {
+            "schema_version": manifest["schema_version"],
+            "checksums_verified": True,
+            **report,
+            "research_baseline": json.loads(
+                (directory / "research_baseline.json").read_text(encoding="utf-8")
+            ),
+            "robustness_plan": json.loads(
+                (directory / "robustness_plan.json").read_text(encoding="utf-8")
+            ),
+            "paper_readiness": json.loads(
+                (directory / "paper_readiness.json").read_text(encoding="utf-8")
+            ),
+        }
+
+    def latest_report_bundle_for_run(self, run_id: str) -> dict[str, Any] | None:
+        latest = self.latest_for_run(run_id)
+        if latest is None:
+            return None
+        return self.inspect_report_bundle(str(latest["report_id"]))
+
     def latest_for_run(self, run_id: str) -> dict[str, Any] | None:
         root = self.root / "reports"
         if not root.is_dir():
@@ -372,6 +402,153 @@ class LocalRobustnessStore:
             if item.get("run_id") == run_id:
                 matches.append(item)
         return max(matches, key=lambda item: str(item.get("created_at", "")), default=None)
+
+    def save_recomputation_bundle(
+        self,
+        *,
+        report: Any,
+        readiness: Any,
+        human_review: Any,
+        evidence_registry: Any,
+    ) -> Path:
+        """Write schema 1.9 beside, never into, the original backtest export."""
+
+        artifact_id = str(report.recomputation_id)
+        directory = self._safe_directory("economic_recomputations", artifact_id)
+        records = {
+            "economic_recomputation.json": report,
+            "decision_invariance.json": report.decision_invariance,
+            "affected_fills.json": report.affected_fills,
+            "recomputed_trades.json": report.affected_trades,
+            "recomputed_equity.json": report.recomputed_equity,
+            "economic_completeness.json": report.completeness,
+            "paper_operating_scenario.json": report.operating,
+            "paper_readiness_v3.json": readiness,
+            "human_review.json": human_review,
+            "evidence_registry.json": evidence_registry,
+        }
+        incoming = {name: self._canonical(value) for name, value in records.items()}
+        if directory.is_dir():
+            self._verify_files(directory)
+            for name, payload in incoming.items():
+                existing = json.loads((directory / name).read_text(encoding="utf-8"))
+                candidate = json.loads(payload)
+                for technical in ("created_at", "recorded_at", "acquired_at"):
+                    if isinstance(existing, dict):
+                        existing.pop(technical, None)
+                    if isinstance(candidate, dict):
+                        candidate.pop(technical, None)
+                if existing != candidate:
+                    raise RobustnessStorageError(
+                        "recomputation ID collides with different immutable economics"
+                    )
+            return directory
+        directory.mkdir(parents=True, exist_ok=False)
+        for name, payload in incoming.items():
+            self._atomic_write(directory / name, payload)
+        manifest = {
+            "algorithm": "SHA-256",
+            "schema_version": ECONOMIC_RECOMPUTATION_SCHEMA_VERSION,
+            "recomputation_hash": str(report.recomputation_hash),
+            "files": {
+                name: _sha256(payload) for name, payload in sorted(incoming.items())
+            },
+        }
+        self._atomic_write(directory / "checksums.json", self._canonical(manifest))
+        return directory
+
+    def inspect_recomputation_bundle(self, recomputation_id: str) -> dict[str, Any]:
+        directory = self._safe_directory("economic_recomputations", recomputation_id)
+        manifest = self._verify_files(directory)
+        report = json.loads(
+            (directory / "economic_recomputation.json").read_text(encoding="utf-8")
+        )
+        readiness = json.loads(
+            (directory / "paper_readiness_v3.json").read_text(encoding="utf-8")
+        )
+        latest_human = self.latest_human_review(str(readiness["readiness_id"]))
+        if latest_human is None:
+            latest_human = json.loads(
+                (directory / "human_review.json").read_text(encoding="utf-8")
+            )
+        return {
+            "schema_version": manifest["schema_version"],
+            "checksums_verified": True,
+            **report,
+            "decision_invariance": json.loads(
+                (directory / "decision_invariance.json").read_text(encoding="utf-8")
+            ),
+            "economic_completeness": json.loads(
+                (directory / "economic_completeness.json").read_text(encoding="utf-8")
+            ),
+            "paper_operating_scenario": json.loads(
+                (directory / "paper_operating_scenario.json").read_text(encoding="utf-8")
+            ),
+            "paper_readiness_v3": readiness,
+            "human_review": latest_human,
+            "evidence_registry": json.loads(
+                (directory / "evidence_registry.json").read_text(encoding="utf-8")
+            ),
+        }
+
+    def latest_recomputation_for_run(self, run_id: str) -> dict[str, Any] | None:
+        root = self.root / "economic_recomputations"
+        if not root.is_dir():
+            return None
+        matches: list[dict[str, Any]] = []
+        for directory in sorted(root.iterdir()):
+            if not directory.is_dir() or not _SAFE_ID.fullmatch(directory.name):
+                continue
+            try:
+                item = self.inspect_recomputation_bundle(directory.name)
+            except RobustnessStorageError:
+                continue
+            if item.get("original_run_id") == run_id:
+                matches.append(item)
+        return max(matches, key=lambda item: str(item.get("created_at", "")), default=None)
+
+    def find_recomputation_by_readiness(self, readiness_id: str) -> dict[str, Any]:
+        if not _SAFE_ID.fullmatch(readiness_id):
+            raise RobustnessStorageError("invalid Paper readiness identifier")
+        root = self.root / "economic_recomputations"
+        if root.is_dir():
+            for directory in sorted(root.iterdir()):
+                if not directory.is_dir() or not _SAFE_ID.fullmatch(directory.name):
+                    continue
+                item = self.inspect_recomputation_bundle(directory.name)
+                if item["paper_readiness_v3"].get("readiness_id") == readiness_id:
+                    return item
+        raise RobustnessStorageError("Paper readiness V3 artifact not found")
+
+    def save_human_review(self, record: Any) -> Path:
+        return self._save_single(
+            "human_reviews",
+            str(record.review_event_id),
+            "human_review.json",
+            record,
+            technical_fields=("recorded_at",),
+        )
+
+    def latest_human_review(self, readiness_id: str) -> dict[str, Any] | None:
+        if not _SAFE_ID.fullmatch(readiness_id):
+            raise RobustnessStorageError("invalid Paper readiness identifier")
+        root = self.root / "human_reviews"
+        if not root.is_dir():
+            return None
+        matches: list[dict[str, Any]] = []
+        for directory in sorted(root.iterdir()):
+            if not directory.is_dir() or not _SAFE_ID.fullmatch(directory.name):
+                continue
+            try:
+                self._verify_files(directory)
+                item = json.loads(
+                    (directory / "human_review.json").read_text(encoding="utf-8")
+                )
+            except (RobustnessStorageError, OSError, ValueError, json.JSONDecodeError):
+                continue
+            if item.get("readiness_id") == readiness_id:
+                matches.append(item)
+        return max(matches, key=lambda item: str(item.get("recorded_at", "")), default=None)
 
     @staticmethod
     def _verify_files(directory: Path) -> dict[str, Any]:

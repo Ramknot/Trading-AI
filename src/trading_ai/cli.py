@@ -97,6 +97,7 @@ from trading_ai.strategies.config import (
 )
 from trading_ai.strategies.registry import BASELINE_STRATEGIES
 from trading_ai.robustness import (
+    EconomicRecomputationService,
     EvidenceClosureService,
     PeriodClassification,
     RobustnessService,
@@ -532,9 +533,12 @@ def build_parser() -> argparse.ArgumentParser:
     validation_readiness = validation_commands.add_parser(
         "paper-readiness", help="inspect a read-only Paper readiness review"
     )
-    validation_readiness.add_argument("--version", choices=("1", "2"), default="1")
+    validation_readiness.add_argument(
+        "--version", choices=("1", "2", "3"), default="1"
+    )
     validation_readiness.add_argument("--report-id")
     validation_readiness.add_argument("--reassessment-id")
+    validation_readiness.add_argument("--recomputation-id")
     _add_store_arguments(validation_readiness)
     validation_reassess = validation_commands.add_parser(
         "reassess-evidence",
@@ -547,6 +551,35 @@ def build_parser() -> argparse.ArgumentParser:
         "--operating-scenario", default="PAPER_ESTIMATE_V1"
     )
     _add_store_arguments(validation_reassess)
+    validation_recompute = validation_commands.add_parser(
+        "recompute-economics",
+        help="recompute dated economics of an immutable consumed holdout",
+    )
+    validation_recompute.add_argument("--run-id", required=True)
+    validation_recompute.add_argument("--report-id")
+    validation_recompute.add_argument("--reassessment-id")
+    validation_recompute.add_argument(
+        "--operating-scenario", default="PAPER_ESTIMATE_V1"
+    )
+    _add_store_arguments(validation_recompute)
+    validation_recomputation_inspect = validation_commands.add_parser(
+        "economic-recomputation",
+        help="inspect one checksum-verified schema 1.9 recomputation bundle",
+    )
+    validation_recomputation_inspect.add_argument("--id", required=True)
+    _add_store_arguments(validation_recomputation_inspect)
+    validation_human_review = validation_commands.add_parser(
+        "human-review",
+        help="inspect or explicitly audit a human Paper-readiness decision",
+    )
+    validation_human_review.add_argument("--readiness-id", required=True)
+    validation_human_review.add_argument(
+        "--decision",
+        choices=("status", "accept-for-lot9-development", "reject"),
+        default="status",
+    )
+    validation_human_review.add_argument("--reason")
+    _add_store_arguments(validation_human_review)
 
     robustness_parser = commands.add_parser(
         "robustness", help="run frozen Lot 8.2 diagnostics without retuning"
@@ -1060,8 +1093,20 @@ def _run_validation(args: argparse.Namespace) -> int:
         )
         return 0
     if args.validation_command == "paper-readiness":
-        if args.version == "2":
-            if not args.reassessment_id or args.report_id:
+        if args.version == "3":
+            if not args.recomputation_id or args.report_id or args.reassessment_id:
+                raise ValueError(
+                    "Paper Readiness V3 requires --recomputation-id only"
+                )
+            payload = EconomicRecomputationService(args.data_root).inspect(
+                args.recomputation_id
+            )["paper_readiness_v3"]
+        elif args.version == "2":
+            if (
+                not args.reassessment_id
+                or args.report_id
+                or args.recomputation_id
+            ):
                 raise ValueError(
                     "Paper Readiness V2 requires --reassessment-id and no --report-id"
                 )
@@ -1069,13 +1114,53 @@ def _run_validation(args: argparse.Namespace) -> int:
                 args.reassessment_id
             )["paper_readiness_v2"]
         else:
-            if not args.report_id or args.reassessment_id:
+            if args.recomputation_id or not args.report_id or args.reassessment_id:
                 raise ValueError(
                     "Paper Readiness V1 requires --report-id and no --reassessment-id"
                 )
             payload = RobustnessService(args.data_root).inspect(args.report_id)[
                 "paper_readiness"
             ]
+        print(_render_payload(payload, args.as_json))
+        return 0
+    if args.validation_command == "recompute-economics":
+        report, readiness, human = EconomicRecomputationService(
+            args.data_root
+        ).recompute(
+            run_id=args.run_id,
+            robustness_report_id=args.report_id,
+            evidence_reassessment_id=args.reassessment_id,
+            operating_scenario_id=args.operating_scenario,
+        )
+        print(
+            _render_payload(
+                {
+                    "economic_recomputation": to_primitive(report),
+                    "paper_readiness_v3": to_primitive(readiness),
+                    "human_review": to_primitive(human),
+                },
+                args.as_json,
+            )
+        )
+        return 0 if report.assessment_status.value == "PASS" else 3
+    if args.validation_command == "economic-recomputation":
+        payload = EconomicRecomputationService(args.data_root).inspect(args.id)
+        print(_render_payload(payload, args.as_json))
+        return 0
+    if args.validation_command == "human-review":
+        service = EconomicRecomputationService(args.data_root)
+        if args.decision == "status":
+            payload = service.human_review_status(args.readiness_id)
+        else:
+            if not args.reason or not args.reason.strip():
+                raise ValueError("an explicit non-empty --reason is required")
+            payload = to_primitive(
+                service.record_human_review(
+                    readiness_id=args.readiness_id,
+                    decision=args.decision,
+                    reason=args.reason,
+                )
+            )
         print(_render_payload(payload, args.as_json))
         return 0
     if args.validation_command == "reassess-evidence":

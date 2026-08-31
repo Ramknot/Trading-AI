@@ -42,8 +42,18 @@ from trading_ai.robustness.reassessment import (
     EvidenceReassessmentEngine,
     PaperReadinessReviewerV2,
 )
+from trading_ai.robustness.economic_recomputation import (
+    DecisionInvarianceStatus,
+    EconomicRecomputationEngine,
+    EconomicRecomputationService,
+    HumanReviewStatus,
+    PaperReadinessReviewerV3,
+    Section31RuleBook,
+    load_economic_recomputation_config,
+)
 from trading_ai.robustness.service import RobustnessService
 from trading_ai.robustness.storage import (
+    ECONOMIC_RECOMPUTATION_SCHEMA_VERSION,
     LocalRobustnessStore,
     ROBUSTNESS_EXPORT_SCHEMA_VERSION,
 )
@@ -56,6 +66,9 @@ __all__ = [
     "EvidenceClosureService",
     "EvidenceRegistryV2",
     "EvidenceReassessmentEngine",
+    "ECONOMIC_RECOMPUTATION_SCHEMA_VERSION",
+    "EconomicRecomputationEngine",
+    "EconomicRecomputationService",
     "HistoricalCoverageAnalyzer",
     "HistoricalCostEvidenceRegistry",
     "HoldoutAccessPolicy",
@@ -63,6 +76,9 @@ __all__ = [
     "LocalRobustnessStore",
     "PaperReadinessReviewer",
     "PaperReadinessReviewerV2",
+    "PaperReadinessReviewerV3",
+    "DecisionInvarianceStatus",
+    "HumanReviewStatus",
     "ROBUSTNESS_EXPORT_SCHEMA_VERSION",
     "RobustnessAnalyzer",
     "RobustnessConfig",
@@ -74,10 +90,12 @@ __all__ = [
     "load_research_baseline_manifest",
     "load_historical_cost_evidence",
     "load_evidence_registry_v2",
+    "load_economic_recomputation_config",
     "load_paper_operating_scenarios",
     "load_research_plan",
     "load_robustness_config",
     "make_untouched_holdout",
     "observed_decision_config_hashes",
     "TariffEvidenceComparator",
+    "Section31RuleBook",
 ]

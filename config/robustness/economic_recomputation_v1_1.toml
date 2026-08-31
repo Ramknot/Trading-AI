@@ -1,0 +1,17 @@
+name = "balanced-costs-recomputation"
+version = "1.1"
+engine_name = "balanced-economic-recomputation"
+engine_version = "1.1"
+base_currency = "USD"
+evidence_registry_version = "2.0"
+fee_type = "SEC_SECTION_31"
+market = "US"
+plan = "IBKR_PRO_FIXED"
+rounding_quantum = "0.00000001"
+rounding_mode = "ROUND_HALF_EVEN"
+period_label = "CONSUMED_HOLDOUT_ECONOMIC_RECOMPUTATION"
+require_verified_evidence = true
+
+# This analytical model is versioned separately from balanced cost model 1.0.
+# It reads dated numeric rates exclusively from EvidenceRegistryV2 and never
+# mutates the original backtest, its cost configuration, or its ledger.
