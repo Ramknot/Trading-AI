@@ -105,6 +105,15 @@ class BacktestViewBuilder:
                 "reason": "no Lot 8.2 robustness report is attached to this run",
             }
         )
+        paper_readiness = (
+            summary.get("evidence")
+            if isinstance(summary.get("evidence"), dict)
+            else {
+                "status": "UNAVAILABLE",
+                "reason": "no checksum-verified Lot 8.3 evidence reassessment is attached",
+                "paper_readiness_v2": {"status": "UNAVAILABLE"},
+            }
+        )
         data_quality = self._data_quality(summary)
         decisions = self._decisions(tables)
         traces = [to_primitive(item) for item in self.build_traces(data)]
@@ -180,6 +189,7 @@ class BacktestViewBuilder:
             "costs": to_primitive(costs),
             "validation": validation,
             "robustness": robustness,
+            "paper_readiness": paper_readiness,
             "decisions": decisions,
             "decision_traces": traces,
             "health": to_primitive(health),

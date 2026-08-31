@@ -14,6 +14,8 @@ def test_monitoring_event_contract_reserves_all_engine_event_types() -> None:
         "RISK_DECISION", "ORDER_INTENT", "FILL", "POSITION_UPDATE",
         "EQUITY_UPDATE", "SYSTEM_HEALTH", "COST_ESTIMATE", "COST_ACTUAL",
         "ECONOMIC_DECISION", "COST_RECONCILIATION", "VALIDATION_RESULT",
+        "EVIDENCE_VERIFIED", "EVIDENCE_CONFLICT", "EVIDENCE_REASSESSMENT",
+        "PAPER_READINESS_REVIEW",
     }
 
 

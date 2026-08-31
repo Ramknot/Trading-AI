@@ -14,10 +14,12 @@
 - Lot 8 — Dashboard & Observability: DONE
 - Lot 8.1 — Validation Gate & Transaction Cost Economics: DONE
 - Lot 8.2 — Real Data Robustness & Validation Remediation: DONE
+- Lot 8.3 — Evidence Closure & Paper Readiness: DONE
 - Real Data Validation Campaign V1: FAIL
 - Extended Historical Campaign: WARNING
-- Final Holdout V2: FAIL
-- Paper Readiness Review: NOT_READY
+- Final Holdout V2: FAIL / CONSUMED
+- Holdout V2 Evidence Reassessment: FAIL
+- Paper Readiness Review V2: NOT_READY
 - Lot 9 — Broker / Paper Trading: TODO
 - Lot 10 — Balanced Paper Validation: TODO
 - Lot 11 — Limited Live: TODO
@@ -75,3 +77,7 @@ The controlled real-data campaign used all 13 configured Balanced symbols at `1d
 ## Lot 8.2 delivery summary
 
 Delivered: an immutable manifest reproducing the consumed Lot 8.1 baseline and a pre-evaluation hashed V2 research plan; tamper-evident `UNTOUCHED`/`CONSUMED`/`INVALIDATED` holdout governance; read-only coverage, decision-funnel, drawdown, symbol-concentration, yearly/subperiod, regime, cost-stress, deterministic uncertainty, leave-one-symbol-out, leave-one-strategy-out, and single-strategy diagnostics; dated official French FTT evidence plus explicit historical-broker-tariff and operating-cost incompleteness; point-in-time universe contracts with unresolved-survivorship disclosure; schema 1.7 robustness exports, CLI, Dashboard, and Paper-readiness review. The consumed V1 remains `FAIL`. The 2012–2025 common-history diagnostic is `WARNING` (397 trades, 7.60% maximum drawdown) because it is diagnostic data with incomplete historical economics and survivorship evidence. The frozen 2025–2026 V2 holdout is `CONSUMED` and `FAIL`: its 38 trades, 10.88% net return before operating costs, and 3.37% drawdown satisfy the unchanged sample/performance/Risk checks, but the unchanged tariff-period criterion fails. Paper readiness remains `NOT_READY`; no threshold was relaxed and no broker, Paper, or `LIVE` path was added.
+
+## Lot 8.3 delivery summary
+
+Delivered: immutable Evidence Registry V2 contracts with official/current/historical/archived/regulatory source classes, dated scope and stable SHA-256 provenance; deterministic exact-match, mathematically conservative, numerically-different, conflict, market, plan, and date-gap tariff assessments; strict decision-core and numeric-cost invariance checks; evidence-only versus economic-recomputation classification; schema 1.8 evidence bundles with tamper-evident checksums; retrospective `PAPER_ESTIMATE_V1` operating-cost ranges and break-even diagnostics; `EconomicEvidenceCompleteness` and read-only `PaperReadinessReviewV2`; offline Evidence/Validation CLI and Dashboard views. Official archived IBKR evidence confirms the modeled US Fixed commission for the consumed holdout, but official IBKR/SEC evidence also identifies a separately applicable Section 31 sell fee that was not debited in the original run. The outcome is therefore `ECONOMIC_RECOMPUTATION_REQUIRED`, evidence reassessment `FAIL`, economic completeness `INCOMPLETE`, and Paper readiness `NOT_READY`. All trading decisions, quantities, fills, and original numeric costs remain unchanged and auditable; the V2 holdout remains `CONSUMED`, no threshold or decision parameter was modified, and no broker, Paper, or `LIVE` path was added.

@@ -260,6 +260,44 @@ function renderRobustness(data) {
   ]);
 }
 
+function renderPaperReadiness(data) {
+  const review = data.paper_readiness_v2 || {};
+  const completeness = data.economic_completeness || {};
+  const tariff = data.broker_tariff || {};
+  const operating = data.paper_economics || data.paper_operating_scenario || {};
+  renderMetrics(byId("paper-readiness-summary"), {
+    readiness: review.status || "UNAVAILABLE",
+    holdout_status: data.holdout_status || "UNAVAILABLE",
+    reassessment_mode: data.mode || "UNAVAILABLE",
+    tariff_compatibility: tariff.status || "UNAVAILABLE",
+    economic_completeness: completeness.status || "UNAVAILABLE",
+    decision_invariance: (data.decision_invariance || {}).status || "UNAVAILABLE",
+    cost_invariance: (data.cost_invariance || {}).status || "UNAVAILABLE",
+    unlocks_paper_or_live: review.unlocks_paper_or_live,
+  });
+  renderTable(byId("evidence-components"), completeness.components || [], [
+    ["Component", "component"], ["Status", "status", "badge"],
+    ["Compatibility", "compatibility"], ["Original", "amount_in_original_run"],
+    ["Missing indicated", "indicated_missing_amount"], ["Reason", "reason"],
+  ]);
+  renderDetails(byId("paper-operating"), {
+    scenario: operating.scenario_id,
+    monthly_or_period_low: operating.operating_low || operating.monthly_totals,
+    period_central: operating.operating_central,
+    period_high: operating.operating_high,
+    net_before_operating: operating.net_before_operating,
+    net_after_central: operating.net_after_operating_central,
+    break_even_monthly_fixed: operating.break_even_monthly_fixed_cost,
+  });
+  renderTable(byId("paper-readiness-criteria"), review.criteria || [], [
+    ["Criterion", "name"], ["Status", "status", "badge"],
+    ["Observed", "observed"], ["Required", "required"], ["Reason", "reason"],
+  ]);
+  renderDetails(byId("paper-readiness-warnings"), {
+    warnings: (review.warnings || data.warnings || []).join(" · ") || "UNAVAILABLE",
+  });
+}
+
 function renderHealth(data) {
   const cards = (data.components || []).map((item) => {
     const card = document.createElement("article"); card.className = "health-card";
@@ -306,17 +344,17 @@ async function loadRun(runId) {
   if (!runId) return;
   try {
     const params = `run_id=${encodeURIComponent(runId)}`;
-    const [overview, equity, portfolio, strategies, regimes, ml, risk, dataQuality, costs, validation, robustness, health, snapshot] = await Promise.all([
+    const [overview, equity, portfolio, strategies, regimes, ml, risk, dataQuality, costs, validation, robustness, paperReadiness, health, snapshot] = await Promise.all([
       fetchJson(`/api/v1/overview?${params}`), fetchJson(`/api/v1/equity?${params}`),
       fetchJson(`/api/v1/portfolio?${params}`), fetchJson(`/api/v1/strategies?${params}`),
       fetchJson(`/api/v1/regimes?${params}`), fetchJson(`/api/v1/ml?${params}`),
       fetchJson(`/api/v1/risk?${params}`), fetchJson(`/api/v1/data-quality?${params}`),
-      fetchJson(`/api/v1/costs?${params}`), fetchJson(`/api/v1/validation?${params}`), fetchJson(`/api/v1/robustness?${params}`), fetchJson(`/api/v1/health?${params}`),
+      fetchJson(`/api/v1/costs?${params}`), fetchJson(`/api/v1/validation?${params}`), fetchJson(`/api/v1/robustness?${params}`), fetchJson(`/api/v1/paper-readiness?${params}`), fetchJson(`/api/v1/health?${params}`),
       fetchJson(`/api/v1/snapshot?${params}`),
     ]);
     renderOverview(overview); renderChart(equity); renderDetails(byId("equity-metrics"), equity.metrics || {});
     renderPortfolio(portfolio); renderStrategies(strategies); renderRegimes(regimes); renderMl(ml);
-    renderRisk(risk); renderData(dataQuality); renderCosts(costs); renderValidation(validation); renderRobustness(robustness); renderHealth(health);
+    renderRisk(risk); renderData(dataQuality); renderCosts(costs); renderValidation(validation); renderRobustness(robustness); renderPaperReadiness(paperReadiness); renderHealth(health);
     const traceSelect = byId("trace-select");
     const traces = snapshot.decision_traces || [];
     traceSelect.replaceChildren();

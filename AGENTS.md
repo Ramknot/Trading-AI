@@ -120,4 +120,11 @@ These rules apply to Codex and every future development agent working in this re
 - A correctness bug fix that changes decision semantics invalidates prior comparability and requires genuinely new final evidence.
 - Training, preprocessing, edge calibration, threshold selection, and model promotion must never inspect an untouched final holdout.
 - Paper readiness is a read-only review status and must never auto-enable a broker, Paper session, or `LIVE`.
+- Evidence-only updates may change evidence status, but they must not alter trading decisions, quantities, or numeric historical costs.
+- A consumed holdout must remain consumed and must never be relabelled as fresh final evidence.
+- A current official tariff is not historical evidence by itself.
+- Conservative historical-cost compatibility must be demonstrated mathematically for every covered rule and must not hide a changed decision.
+- Conflicting official evidence must remain unresolved until dates, market, plan, and fee scope are reconciled explicitly.
+- Paper readiness is not Live readiness; `READY_FOR_REVIEW` never auto-enables a broker, Paper session, or `LIVE`.
+- Evidence acquisition and reassessment must never retune Strategy, Feature, Regime, ML, Policy, Portfolio, Risk, Cost, Economic Gate, or Validation parameters.
 - Update `PROJECT_STATE.md` when a lot changes state.

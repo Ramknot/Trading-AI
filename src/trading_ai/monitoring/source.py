@@ -68,7 +68,7 @@ class _CacheEntry:
 
 
 class BacktestMonitoringSource(MonitoringSource):
-    """Read backtest schemas 1.0--1.6 plus linked robustness schema 1.7.
+    """Read backtest 1.0--1.6 and linked robustness/evidence 1.7--1.8.
 
     The backtest artifact itself keeps the Lot 8.1 schema.  Lot 8.2 reports
     live in a separate, checksum-verified local store and are attached to the
@@ -137,6 +137,9 @@ class BacktestMonitoringSource(MonitoringSource):
             latest_robustness = self.robustness_store.latest_for_run(run_id)
             if latest_robustness is not None:
                 summary["robustness"] = redact_sensitive(latest_robustness)
+            latest_evidence = self.robustness_store.latest_evidence_for_run(run_id)
+            if latest_evidence is not None:
+                summary["evidence"] = redact_sensitive(latest_evidence)
             checksums_bytes = (directory / "checksums.json").read_bytes()
             fingerprint = hashlib.sha256(checksums_bytes).hexdigest()
             cache_token = self.cache_token(run_id)
@@ -201,6 +204,7 @@ class BacktestMonitoringSource(MonitoringSource):
                     "files": metadata,
                     "validation": self.validation_store.latest_for_run(run_id),
                     "robustness": self.robustness_store.latest_for_run(run_id),
+                    "evidence": self.robustness_store.latest_evidence_for_run(run_id),
                 }
             )
         except FileNotFoundError as exc:
@@ -319,4 +323,52 @@ class BacktestMonitoringSource(MonitoringSource):
                     status=str(validation.get("status", "UNAVAILABLE")),
                 )
             )
+        evidence = summary.get("evidence")
+        if isinstance(evidence, dict) and evidence.get("reassessment_id"):
+            timestamp = datetime.fromisoformat(
+                str(evidence.get("created_at")).replace("Z", "+00:00")
+            ).astimezone(timezone.utc)
+            event_specs = (
+                (
+                    MonitoringEventType.EVIDENCE_CONFLICT
+                    if (evidence.get("evidence_registry") or {}).get("conflicts")
+                    else MonitoringEventType.EVIDENCE_VERIFIED,
+                    str((evidence.get("evidence_registry") or {}).get("registry_hash", "UNAVAILABLE")),
+                    "CONFLICT"
+                    if (evidence.get("evidence_registry") or {}).get("conflicts")
+                    else "VERIFIED",
+                    evidence.get("evidence_registry") or {},
+                ),
+                (
+                    MonitoringEventType.EVIDENCE_REASSESSMENT,
+                    str(evidence["reassessment_id"]),
+                    str(evidence.get("strict_validation_evidence_status", "UNAVAILABLE")),
+                    evidence,
+                ),
+                (
+                    MonitoringEventType.PAPER_READINESS_REVIEW,
+                    str((evidence.get("paper_readiness_v2") or {}).get("review_id", "UNAVAILABLE")),
+                    str((evidence.get("paper_readiness_v2") or {}).get("status", "UNAVAILABLE")),
+                    evidence.get("paper_readiness_v2") or {},
+                ),
+            )
+            for event_type, entity_id, status, payload_value in event_specs:
+                events.append(
+                    MonitoringEvent(
+                        event_id=f"{data.run_id}:{event_type.value}:{entity_id}",
+                        timestamp=timestamp,
+                        event_type=event_type,
+                        run_id=data.run_id,
+                        session_id=data.run_id,
+                        source_component="EvidenceClosure",
+                        component_version="2.0",
+                        related_ids=(("reassessment_id", str(evidence["reassessment_id"])),),
+                        provenance=provenance,
+                        payload_json=json.dumps(
+                            to_primitive(payload_value), sort_keys=True,
+                            separators=(",", ":"), allow_nan=False,
+                        ),
+                        status=status,
+                    )
+                )
         return tuple(sorted(events, key=lambda item: (item.timestamp, item.event_id)))

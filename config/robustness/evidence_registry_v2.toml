@@ -1,0 +1,221 @@
+registry_version = "2.0"
+acquired_at = 2026-08-31T00:00:00Z
+
+# This file stores normalized, offline evidence metadata only.  Runtime code
+# never scrapes these URLs.  The four archived intervals below are bounded by
+# successive official-page observations with unchanged normalized rules.
+
+[[evidence]]
+evidence_id = "ibkr-us-fixed-2025-01-01"
+provider = "Interactive Brokers"
+market = "US"
+fee_type = "BROKER_COMMISSION"
+plan = "IBKR_PRO_FIXED"
+source_type = "ARCHIVED_OFFICIAL_SOURCE"
+verification_status = "VERIFIED"
+effective_from = 2025-01-01T00:00:00Z
+effective_to = 2025-09-11T02:34:39Z
+retrieved_at = 2026-08-31T00:00:00Z
+archive_timestamp = 2025-01-01T21:25:57Z
+archive_digest = "4C33YR4VTJ2D56BI72AF5MEBYJUQX4J2"
+source_reference = "https://web.archive.org/web/20250101212557id_/https://www.interactivebrokers.com/en/pricing/commissions-stocks.php"
+original_source_reference = "https://www.interactivebrokers.com/en/pricing/commissions-stocks.php"
+supporting_references = ["https://web.archive.org/web/20250911023439id_/https://www.interactivebrokers.com/en/pricing/commissions-stocks.php"]
+notes = "Official IBKR archive: Pro Fixed USD 0.005/share, USD 1 minimum, 1% trade-value cap; unchanged at the next archived observation."
+rules = { currency = "USD", fixed_per_order = "0", per_unit = "0.005", proportional_bps = "0", minimum_per_order = "1.00", maximum_notional_fraction = "0.01" }
+
+[[evidence]]
+evidence_id = "ibkr-us-fixed-2025-09-11"
+provider = "Interactive Brokers"
+market = "US"
+fee_type = "BROKER_COMMISSION"
+plan = "IBKR_PRO_FIXED"
+source_type = "ARCHIVED_OFFICIAL_SOURCE"
+verification_status = "VERIFIED"
+effective_from = 2025-09-11T02:34:39Z
+effective_to = 2026-01-15T08:07:59Z
+retrieved_at = 2026-08-31T00:00:00Z
+archive_timestamp = 2025-09-11T02:34:39Z
+archive_digest = "FUWFNNRX7EK3NIURJSM4GXZ6JFNNMGTR"
+source_reference = "https://web.archive.org/web/20250911023439id_/https://www.interactivebrokers.com/en/pricing/commissions-stocks.php"
+original_source_reference = "https://www.interactivebrokers.com/en/pricing/commissions-stocks.php"
+supporting_references = ["https://web.archive.org/web/20260115080759id_/https://www.interactivebrokers.com/en/pricing/commissions-stocks.php"]
+notes = "Official IBKR archive series; normalized Pro Fixed rules remained unchanged."
+rules = { currency = "USD", fixed_per_order = "0", per_unit = "0.005", proportional_bps = "0", minimum_per_order = "1.00", maximum_notional_fraction = "0.01" }
+
+[[evidence]]
+evidence_id = "ibkr-us-fixed-2026-01-15"
+provider = "Interactive Brokers"
+market = "US"
+fee_type = "BROKER_COMMISSION"
+plan = "IBKR_PRO_FIXED"
+source_type = "ARCHIVED_OFFICIAL_SOURCE"
+verification_status = "VERIFIED"
+effective_from = 2026-01-15T08:07:59Z
+effective_to = 2026-07-17T14:07:02Z
+retrieved_at = 2026-08-31T00:00:00Z
+archive_timestamp = 2026-01-15T08:07:59Z
+archive_digest = "YSMD7GLETCKZ4V7CXPSPVUGYSLFVSQAD"
+source_reference = "https://web.archive.org/web/20260115080759id_/https://www.interactivebrokers.com/en/pricing/commissions-stocks.php"
+original_source_reference = "https://www.interactivebrokers.com/en/pricing/commissions-stocks.php"
+supporting_references = ["https://web.archive.org/web/20260717140702id_/https://www.interactivebrokers.com/en/pricing/commissions-stocks.php"]
+notes = "Official IBKR archive series; normalized Pro Fixed rules remained unchanged."
+rules = { currency = "USD", fixed_per_order = "0", per_unit = "0.005", proportional_bps = "0", minimum_per_order = "1.00", maximum_notional_fraction = "0.01" }
+
+[[evidence]]
+evidence_id = "ibkr-us-fixed-2026-07-17"
+provider = "Interactive Brokers"
+market = "US"
+fee_type = "BROKER_COMMISSION"
+plan = "IBKR_PRO_FIXED"
+source_type = "ARCHIVED_OFFICIAL_SOURCE"
+verification_status = "VERIFIED"
+effective_from = 2026-07-17T14:07:02Z
+effective_to = 2026-08-29T00:00:00Z
+retrieved_at = 2026-08-31T00:00:00Z
+archive_timestamp = 2026-07-17T14:07:02Z
+archive_digest = "WFHIZ2SSS2T45OJHTFU2UKILCBT554N6"
+source_reference = "https://web.archive.org/web/20260717140702id_/https://www.interactivebrokers.com/en/pricing/commissions-stocks.php"
+original_source_reference = "https://www.interactivebrokers.com/en/pricing/commissions-stocks.php"
+supporting_references = ["https://www.interactivebrokers.com/en/pricing/commissions-stocks.php"]
+notes = "Official archive near holdout end, corroborated by the current official page after the last complete holdout session."
+rules = { currency = "USD", fixed_per_order = "0", per_unit = "0.005", proportional_bps = "0", minimum_per_order = "1.00", maximum_notional_fraction = "0.01" }
+
+[[evidence]]
+evidence_id = "ibkr-us-fixed-current-2026-08-31"
+provider = "Interactive Brokers"
+market = "US"
+fee_type = "BROKER_COMMISSION"
+plan = "IBKR_PRO_FIXED"
+source_type = "CURRENT_OFFICIAL_SOURCE"
+verification_status = "VERIFIED"
+effective_from = 2026-08-29T00:00:00Z
+effective_to = 2030-01-01T00:00:00Z
+retrieved_at = 2026-08-31T00:00:00Z
+source_reference = "https://www.interactivebrokers.com/en/pricing/commissions-stocks.php"
+notes = "Current official tariff corroboration only; never used alone as historical evidence."
+rules = { currency = "USD", fixed_per_order = "0", per_unit = "0.005", proportional_bps = "0", minimum_per_order = "1.00", maximum_notional_fraction = "0.01" }
+
+# Fixed pricing includes ordinary exchange, clearing, and regulatory fees, but
+# IBKR's official pricing-structure disclosure explicitly separates SEC
+# Section 31 charges on covered US sales.
+[[evidence]]
+evidence_id = "ibkr-fixed-inclusions-holdout-v2"
+provider = "Interactive Brokers"
+market = "US"
+fee_type = "FIXED_PLAN_FEE_SCOPE"
+plan = "IBKR_PRO_FIXED"
+source_type = "HISTORICAL_OFFICIAL_SOURCE"
+verification_status = "VERIFIED"
+effective_from = 2025-01-01T00:00:00Z
+effective_to = 2026-08-29T00:00:00Z
+retrieved_at = 2026-08-31T00:00:00Z
+source_reference = "https://gdcdyn.interactivebrokers.com/Universal/servlet/Registration_v3.formHelp?s=p2106"
+supporting_references = ["https://www.interactivebrokers.com/en/pricing/commissions-home.php"]
+notes = "Fixed includes exchange/clearing/regulatory fees; SEC Section 31 is explicitly additional on covered sell orders."
+rules = { exchange_clearing_regular_included = "true", sec_section_31_separate = "true" }
+
+[[evidence]]
+evidence_id = "sec-section31-fy2025-pre-zero"
+provider = "US SEC"
+market = "US"
+fee_type = "SEC_SECTION_31"
+plan = "IBKR_PRO_FIXED"
+source_type = "REGULATORY_SOURCE"
+verification_status = "VERIFIED"
+effective_from = 2025-01-01T00:00:00Z
+effective_to = 2025-05-14T00:00:00Z
+retrieved_at = 2026-08-31T00:00:00Z
+source_reference = "https://www.sec.gov/rules-regulations/fee-rate-advisories/2025-2"
+notes = "SEC FY2025 advisory: USD 27.80 per million on covered sales through 13 May 2025."
+rules = { applicable_side = "SELL", rate_per_million = "27.80", currency = "USD" }
+
+[[evidence]]
+evidence_id = "sec-section31-zero-2025-05-14"
+provider = "US SEC"
+market = "US"
+fee_type = "SEC_SECTION_31"
+plan = "IBKR_PRO_FIXED"
+source_type = "REGULATORY_SOURCE"
+verification_status = "VERIFIED"
+effective_from = 2025-05-14T00:00:00Z
+effective_to = 2026-04-04T00:00:00Z
+retrieved_at = 2026-08-31T00:00:00Z
+source_reference = "https://www.sec.gov/rules-regulations/fee-rate-advisories/2025-2"
+notes = "SEC FY2025 advisory: rate reduced to USD 0.00 per million from 14 May 2025 until the FY2026 change."
+rules = { applicable_side = "SELL", rate_per_million = "0", currency = "USD" }
+
+[[evidence]]
+evidence_id = "sec-section31-fy2026"
+provider = "US SEC"
+market = "US"
+fee_type = "SEC_SECTION_31"
+plan = "IBKR_PRO_FIXED"
+source_type = "REGULATORY_SOURCE"
+verification_status = "VERIFIED"
+effective_from = 2026-04-04T00:00:00Z
+effective_to = 2027-01-01T00:00:00Z
+retrieved_at = 2026-08-31T00:00:00Z
+source_reference = "https://www.sec.gov/rules-regulations/fee-rate-advisories/2026-2"
+notes = "SEC FY2026 advisory: USD 20.60 per million on covered sales from 4 April 2026."
+rules = { applicable_side = "SELL", rate_per_million = "20.60", currency = "USD" }
+
+[[evidence]]
+evidence_id = "finra-taf-2025-2026"
+provider = "FINRA"
+market = "US"
+fee_type = "FINRA_TAF"
+plan = "IBKR_PRO_FIXED"
+source_type = "REGULATORY_SOURCE"
+verification_status = "VERIFIED"
+effective_from = 2025-01-01T00:00:00Z
+effective_to = 2027-01-01T00:00:00Z
+retrieved_at = 2026-08-31T00:00:00Z
+source_reference = "https://www.finra.org/rules-guidance/rule-filings/sr-finra-2024-019/fee-adjustment-schedule"
+notes = "Official FINRA TAF schedule; ordinary regulatory fees are included in IBKR Fixed except the separately disclosed SEC Section 31 fee."
+rules = { rate_2025_per_share = "0.000166", cap_2025 = "8.30", rate_2026_per_share = "0.000195", cap_2026 = "9.79" }
+
+[[evidence]]
+evidence_id = "ibkr-fx-current-2026-08-31"
+provider = "Interactive Brokers"
+market = "FX"
+fee_type = "FX_CONVERSION"
+plan = "IBKR_PRO"
+source_type = "CURRENT_OFFICIAL_SOURCE"
+verification_status = "VERIFIED"
+effective_from = 2026-08-31T00:00:00Z
+effective_to = 2030-01-01T00:00:00Z
+retrieved_at = 2026-08-31T00:00:00Z
+source_reference = "https://www.interactivebrokers.com/en/pricing/commissions-spot-currencies.php"
+notes = "Current official source: manual spot FX tier starts at 0.20 bp with USD 2 minimum; auto conversion may adjust the rate by 0.03%. Not historical holdout proof."
+rules = { manual_tier1_bps = "0.20", manual_minimum_usd = "2.00", auto_conversion_rate_adjustment_bps = "3.0" }
+
+[[evidence]]
+evidence_id = "france-ftt-rate-through-2025q1"
+provider = "French tax authority"
+market = "FR"
+fee_type = "TRANSACTION_TAX"
+plan = "FRANCE_FTT"
+source_type = "REGULATORY_SOURCE"
+verification_status = "VERIFIED"
+effective_from = 2020-01-01T00:00:00Z
+effective_to = 2025-04-01T00:00:00Z
+retrieved_at = 2026-08-31T00:00:00Z
+source_reference = "https://bofip.impots.gouv.fr/bofip/10831-PGP.html/identifiant=ACTU-2017-00089"
+notes = "Official BOFiP source for the 0.30% French financial transaction tax rate."
+rules = { rate_bps = "30", applicable_side = "BUY", eligibility = "ANNUAL_OFFICIAL_LIST" }
+
+[[evidence]]
+evidence_id = "france-ftt-rate-from-2025q2"
+provider = "French tax authority"
+market = "FR"
+fee_type = "TRANSACTION_TAX"
+plan = "FRANCE_FTT"
+source_type = "REGULATORY_SOURCE"
+verification_status = "VERIFIED"
+effective_from = 2025-04-01T00:00:00Z
+effective_to = 2027-01-01T00:00:00Z
+retrieved_at = 2026-08-31T00:00:00Z
+source_reference = "https://bofip.impots.gouv.fr/bofip/7575-PGP.html/identifiant=BOI-TCA-FIN-10-30-20250528"
+notes = "Official BOFiP source for the 0.40% rate from 1 April 2025; eligibility remains annual and issuer-specific."
+rules = { rate_bps = "40", applicable_side = "BUY", eligibility = "ANNUAL_OFFICIAL_LIST" }

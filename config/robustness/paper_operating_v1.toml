@@ -1,0 +1,133 @@
+version = "1.0"
+
+# Read-only research ranges.  Nothing here subscribes to a service or selects
+# a deployment provider.  Monthly amounts are scenario estimates in USD.
+
+[scenarios.LOCAL_PC]
+deployment_mode = "LOCAL_PC"
+
+[scenarios.LOCAL_PC.components.market_data_subscription]
+status = "ESTIMATED_CONSERVATIVE"
+currency = "USD"
+monthly_low = "10"
+monthly_central = "25"
+monthly_high = "100"
+source_type = "CURRENT_OFFICIAL_SOURCE"
+source_reference = "https://portal.interactivebrokers.com/en/pricing/market-data-pricing.php"
+notes = "Range covers current US snapshot/non-consolidated and possible Euronext display needs; entitlement and professional status can change the actual amount."
+
+[scenarios.LOCAL_PC.components.server_vps]
+status = "VERIFIED"
+currency = "USD"
+monthly_low = "0"
+monthly_central = "0"
+monthly_high = "0"
+source_type = "ESTIMATE"
+source_reference = "LOCAL_PC"
+notes = "No VPS is used in the local-PC scenario."
+
+[scenarios.LOCAL_PC.components.software_subscription]
+status = "VERIFIED"
+currency = "USD"
+monthly_low = "0"
+monthly_central = "0"
+monthly_high = "0"
+source_type = "ESTIMATE"
+source_reference = "PROJECT_DEPENDENCY_MANIFEST"
+notes = "The repository declares no mandatory paid software subscription."
+
+[scenarios.LOCAL_PC.components.other_fixed_cost]
+status = "ESTIMATED_CONSERVATIVE"
+currency = "USD"
+monthly_low = "0"
+monthly_central = "5"
+monthly_high = "25"
+source_type = "ESTIMATE"
+source_reference = "RESEARCH_SCENARIO_ASSUMPTION"
+notes = "Electricity and hardware amortisation are estimates, not observed invoices."
+
+[scenarios.VPS_ESTIMATE]
+deployment_mode = "VPS_ESTIMATE"
+
+[scenarios.VPS_ESTIMATE.components.market_data_subscription]
+status = "ESTIMATED_CONSERVATIVE"
+currency = "USD"
+monthly_low = "10"
+monthly_central = "25"
+monthly_high = "100"
+source_type = "CURRENT_OFFICIAL_SOURCE"
+source_reference = "https://portal.interactivebrokers.com/en/pricing/market-data-pricing.php"
+notes = "Same current market-data range as LOCAL_PC; no subscription is made."
+
+[scenarios.VPS_ESTIMATE.components.server_vps]
+status = "ESTIMATED_CONSERVATIVE"
+currency = "USD"
+monthly_low = "10"
+monthly_central = "35"
+monthly_high = "100"
+source_type = "ESTIMATE"
+source_reference = "NO_PROVIDER_SELECTED"
+notes = "Provider-neutral VPS research range; no host is selected or deployed."
+
+[scenarios.VPS_ESTIMATE.components.software_subscription]
+status = "VERIFIED"
+currency = "USD"
+monthly_low = "0"
+monthly_central = "0"
+monthly_high = "0"
+source_type = "ESTIMATE"
+source_reference = "PROJECT_DEPENDENCY_MANIFEST"
+notes = "The repository declares no mandatory paid software subscription."
+
+[scenarios.VPS_ESTIMATE.components.other_fixed_cost]
+status = "ESTIMATED_CONSERVATIVE"
+currency = "USD"
+monthly_low = "0"
+monthly_central = "5"
+monthly_high = "25"
+source_type = "ESTIMATE"
+source_reference = "RESEARCH_SCENARIO_ASSUMPTION"
+notes = "Miscellaneous fixed-cost range, not an invoice."
+
+[scenarios.PAPER_ESTIMATE_V1]
+deployment_mode = "PAPER_REVIEW_ONLY"
+
+[scenarios.PAPER_ESTIMATE_V1.components.market_data_subscription]
+status = "ESTIMATED_CONSERVATIVE"
+currency = "USD"
+monthly_low = "10"
+monthly_central = "25"
+monthly_high = "100"
+source_type = "CURRENT_OFFICIAL_SOURCE"
+source_reference = "https://portal.interactivebrokers.com/en/pricing/market-data-pricing.php"
+notes = "Current official menu anchors the range; exact bundle depends on entitlement, venue coverage, and professional status. No purchase is made."
+
+[scenarios.PAPER_ESTIMATE_V1.components.server_vps]
+status = "ESTIMATED_CONSERVATIVE"
+currency = "USD"
+monthly_low = "0"
+monthly_central = "0"
+monthly_high = "100"
+source_type = "ESTIMATE"
+source_reference = "LOCAL_PC_OR_FUTURE_VPS"
+notes = "Paper may remain local or later use a separately reviewed VPS; no provider is selected."
+
+[scenarios.PAPER_ESTIMATE_V1.components.software_subscription]
+status = "VERIFIED"
+currency = "USD"
+monthly_low = "0"
+monthly_central = "0"
+monthly_high = "0"
+source_type = "ESTIMATE"
+source_reference = "PROJECT_DEPENDENCY_MANIFEST"
+notes = "No mandatory paid software subscription is declared."
+
+[scenarios.PAPER_ESTIMATE_V1.components.other_fixed_cost]
+status = "ESTIMATED_CONSERVATIVE"
+currency = "USD"
+monthly_low = "0"
+monthly_central = "5"
+monthly_high = "25"
+source_type = "ESTIMATE"
+source_reference = "RESEARCH_SCENARIO_ASSUMPTION"
+notes = "Explicit range for unobserved fixed costs; never silently zero."

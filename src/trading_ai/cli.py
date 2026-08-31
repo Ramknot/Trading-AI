@@ -97,6 +97,7 @@ from trading_ai.strategies.config import (
 )
 from trading_ai.strategies.registry import BASELINE_STRATEGIES
 from trading_ai.robustness import (
+    EvidenceClosureService,
     PeriodClassification,
     RobustnessService,
     load_historical_cost_evidence,
@@ -531,8 +532,21 @@ def build_parser() -> argparse.ArgumentParser:
     validation_readiness = validation_commands.add_parser(
         "paper-readiness", help="inspect a read-only Paper readiness review"
     )
-    validation_readiness.add_argument("--report-id", required=True)
+    validation_readiness.add_argument("--version", choices=("1", "2"), default="1")
+    validation_readiness.add_argument("--report-id")
+    validation_readiness.add_argument("--reassessment-id")
     _add_store_arguments(validation_readiness)
+    validation_reassess = validation_commands.add_parser(
+        "reassess-evidence",
+        help="reassess a consumed holdout using offline evidence without freshening it",
+    )
+    validation_reassess.add_argument("--run-id", required=True)
+    validation_reassess.add_argument("--report-id", required=True)
+    validation_reassess.add_argument("--candidate-run-id")
+    validation_reassess.add_argument(
+        "--operating-scenario", default="PAPER_ESTIMATE_V1"
+    )
+    _add_store_arguments(validation_reassess)
 
     robustness_parser = commands.add_parser(
         "robustness", help="run frozen Lot 8.2 diagnostics without retuning"
@@ -588,6 +602,32 @@ def build_parser() -> argparse.ArgumentParser:
     robustness_compare.add_argument("--without-strategy", action="append", default=[])
     robustness_compare.add_argument("--single-strategy", action="append", default=[])
     _add_store_arguments(robustness_compare)
+
+    evidence_parser = commands.add_parser(
+        "evidence", help="inspect dated official evidence and immutable reassessments"
+    )
+    evidence_commands = evidence_parser.add_subparsers(
+        dest="evidence_command", required=True
+    )
+    evidence_verify = evidence_commands.add_parser(
+        "verify", help="verify the offline Evidence Registry V2"
+    )
+    _add_store_arguments(evidence_verify)
+    evidence_inspect = evidence_commands.add_parser(
+        "inspect", help="inspect one checksum-verified schema 1.8 reassessment"
+    )
+    evidence_inspect.add_argument("--reassessment-id", required=True)
+    _add_store_arguments(evidence_inspect)
+    evidence_compare = evidence_commands.add_parser(
+        "compare", help="compare frozen holdout assumptions with dated evidence"
+    )
+    evidence_compare.add_argument("--run-id", required=True)
+    evidence_compare.add_argument("--report-id", required=True)
+    evidence_compare.add_argument("--candidate-run-id")
+    evidence_compare.add_argument(
+        "--operating-scenario", default="PAPER_ESTIMATE_V1"
+    )
+    _add_store_arguments(evidence_compare)
 
     dashboard_parser = commands.add_parser(
         "dashboard", help="serve or inspect the local read-only observability UI"
@@ -1020,8 +1060,40 @@ def _run_validation(args: argparse.Namespace) -> int:
         )
         return 0
     if args.validation_command == "paper-readiness":
-        payload = RobustnessService(args.data_root).inspect(args.report_id)
-        print(_render_payload(payload["paper_readiness"], args.as_json))
+        if args.version == "2":
+            if not args.reassessment_id or args.report_id:
+                raise ValueError(
+                    "Paper Readiness V2 requires --reassessment-id and no --report-id"
+                )
+            payload = EvidenceClosureService(args.data_root).inspect(
+                args.reassessment_id
+            )["paper_readiness_v2"]
+        else:
+            if not args.report_id or args.reassessment_id:
+                raise ValueError(
+                    "Paper Readiness V1 requires --report-id and no --reassessment-id"
+                )
+            payload = RobustnessService(args.data_root).inspect(args.report_id)[
+                "paper_readiness"
+            ]
+        print(_render_payload(payload, args.as_json))
+        return 0
+    if args.validation_command == "reassess-evidence":
+        reassessment, readiness = EvidenceClosureService(args.data_root).reassess(
+            run_id=args.run_id,
+            robustness_report_id=args.report_id,
+            candidate_run_id=args.candidate_run_id,
+            operating_scenario_id=args.operating_scenario,
+        )
+        print(
+            _render_payload(
+                {
+                    "reassessment": to_primitive(reassessment),
+                    "paper_readiness_v2": to_primitive(readiness),
+                },
+                args.as_json,
+            )
+        )
         return 0
     if args.validation_command == "inspect":
         print(_render_payload(store.inspect(args.validation_id), args.as_json))
@@ -1095,6 +1167,34 @@ def _run_robustness(args: argparse.Namespace) -> int:
         print(_render_payload(payload, args.as_json))
         return 0
     raise AssertionError(f"unhandled robustness command: {args.robustness_command}")
+
+
+def _run_evidence(args: argparse.Namespace) -> int:
+    service = EvidenceClosureService(args.data_root)
+    if args.evidence_command == "verify":
+        print(_render_payload(service.verify_registry(), args.as_json))
+        return 0
+    if args.evidence_command == "inspect":
+        print(_render_payload(service.inspect(args.reassessment_id), args.as_json))
+        return 0
+    if args.evidence_command == "compare":
+        reassessment, readiness = service.reassess(
+            run_id=args.run_id,
+            robustness_report_id=args.report_id,
+            candidate_run_id=args.candidate_run_id,
+            operating_scenario_id=args.operating_scenario,
+        )
+        print(
+            _render_payload(
+                {
+                    "reassessment": to_primitive(reassessment),
+                    "paper_readiness_v2": to_primitive(readiness),
+                },
+                args.as_json,
+            )
+        )
+        return 0
+    raise AssertionError(f"unhandled evidence command: {args.evidence_command}")
 
 
 def _regime_snapshot_payload(snapshot) -> dict[str, Any]:
@@ -1699,6 +1799,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_validation(args)
         if args.command == "robustness":
             return _run_robustness(args)
+        if args.command == "evidence":
+            return _run_evidence(args)
         if args.command == "dashboard":
             return _run_dashboard(args)
         if args.command == "monitoring":

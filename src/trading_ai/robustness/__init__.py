@@ -31,6 +31,17 @@ from trading_ai.robustness.governance import (
 )
 from trading_ai.robustness.models import *  # noqa: F403
 from trading_ai.robustness.readiness import PaperReadinessReviewer
+from trading_ai.robustness.evidence import (
+    EvidenceRegistryV2,
+    TariffEvidenceComparator,
+    load_evidence_registry_v2,
+    load_paper_operating_scenarios,
+)
+from trading_ai.robustness.reassessment import (
+    EvidenceClosureService,
+    EvidenceReassessmentEngine,
+    PaperReadinessReviewerV2,
+)
 from trading_ai.robustness.service import RobustnessService
 from trading_ai.robustness.storage import (
     LocalRobustnessStore,
@@ -42,12 +53,16 @@ __all__ = [
     "ConcentrationAnalyzer",
     "DecisionFunnelAnalyzer",
     "DrawdownAnalyzer",
+    "EvidenceClosureService",
+    "EvidenceRegistryV2",
+    "EvidenceReassessmentEngine",
     "HistoricalCoverageAnalyzer",
     "HistoricalCostEvidenceRegistry",
     "HoldoutAccessPolicy",
     "HoldoutConsumer",
     "LocalRobustnessStore",
     "PaperReadinessReviewer",
+    "PaperReadinessReviewerV2",
     "ROBUSTNESS_EXPORT_SCHEMA_VERSION",
     "RobustnessAnalyzer",
     "RobustnessConfig",
@@ -58,8 +73,11 @@ __all__ = [
     "decision_core_hash",
     "load_research_baseline_manifest",
     "load_historical_cost_evidence",
+    "load_evidence_registry_v2",
+    "load_paper_operating_scenarios",
     "load_research_plan",
     "load_robustness_config",
     "make_untouched_holdout",
     "observed_decision_config_hashes",
+    "TariffEvidenceComparator",
 ]

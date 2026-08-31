@@ -144,7 +144,8 @@ def test_api_exposes_all_read_only_sections_and_full_decision_trace(
     run_id = result.run_id
     routes = (
         "overview", "equity", "portfolio", "strategies", "regimes", "ml",
-        "risk", "data-quality", "costs", "validation", "robustness", "decisions", "events", "health",
+        "risk", "data-quality", "costs", "validation", "robustness",
+        "paper-readiness", "decisions", "events", "health",
     )
     for route in routes:
         response = dashboard_client.get(f"/api/v1/{route}", params={"run_id": run_id})
@@ -160,6 +161,7 @@ def test_api_exposes_all_read_only_sections_and_full_decision_trace(
     assert snapshot["portfolio"]["engine_name"] == "balanced-portfolio"
     assert snapshot["ml"]["mode"] == "SCORE_ONLY"
     assert snapshot["robustness"]["status"] == "UNAVAILABLE"
+    assert snapshot["paper_readiness"]["status"] == "UNAVAILABLE"
     assert {item["name"] for item in snapshot["strategies"]["strategies"]} == {
         "trend", "momentum"
     }
@@ -235,7 +237,8 @@ def test_dashboard_html_is_responsive_escaped_and_has_no_trading_controls(
     html = response.text
     for section in (
         "Overview", "Portfolio", "Strategies", "Regimes", "ML", "Risk",
-        "Data Quality", "Costs", "Robustness", "System Health", "Decision Trace",
+        "Data Quality", "Costs", "Robustness", "Paper Readiness V2",
+        "System Health", "Decision Trace",
     ):
         assert section in html
     assert "READ ONLY · LOCAL" in html

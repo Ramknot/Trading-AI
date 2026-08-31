@@ -21,6 +21,8 @@ from trading_ai.robustness.models import (
 
 
 ROBUSTNESS_EXPORT_SCHEMA_VERSION = "1.7"
+EVIDENCE_EXPORT_SCHEMA_VERSION = "1.8"
+_SUPPORTED_ROBUSTNESS_SCHEMAS = {"1.7", "1.8"}
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
@@ -282,11 +284,100 @@ class LocalRobustnessStore:
                 matches.append(report)
         return max(matches, key=lambda item: str(item.get("created_at", "")), default=None)
 
+    def save_evidence_bundle(
+        self,
+        *,
+        reassessment: Any,
+        registry: Any,
+        completeness: Any,
+        operating_scenario: Any,
+        readiness: Any,
+    ) -> Path:
+        """Store Lot 8.3 evidence without rewriting a consumed backtest/report."""
+
+        artifact_id = str(reassessment.reassessment_id)
+        directory = self._safe_directory("evidence_reassessments", artifact_id)
+        records = {
+            "evidence_registry.json": registry,
+            "evidence_reassessment.json": reassessment,
+            "economic_completeness.json": completeness,
+            "paper_operating_scenario.json": operating_scenario,
+            "paper_readiness_v2.json": readiness,
+        }
+        incoming = {name: self._canonical(value) for name, value in records.items()}
+        if directory.is_dir():
+            self._verify_files(directory)
+            for name, payload in incoming.items():
+                existing = json.loads((directory / name).read_text(encoding="utf-8"))
+                candidate = json.loads(payload)
+                if isinstance(existing, dict):
+                    existing.pop("created_at", None)
+                if isinstance(candidate, dict):
+                    candidate.pop("created_at", None)
+                if existing != candidate:
+                    raise RobustnessStorageError(
+                        "evidence reassessment ID collides with different immutable facts"
+                    )
+            return directory
+        directory.mkdir(parents=True, exist_ok=False)
+        for name, payload in incoming.items():
+            self._atomic_write(directory / name, payload)
+        manifest = {
+            "algorithm": "SHA-256",
+            "schema_version": EVIDENCE_EXPORT_SCHEMA_VERSION,
+            "reassessment_hash": str(reassessment.reassessment_hash),
+            "files": {
+                name: _sha256(payload) for name, payload in sorted(incoming.items())
+            },
+        }
+        self._atomic_write(directory / "checksums.json", self._canonical(manifest))
+        return directory
+
+    def inspect_evidence_bundle(self, reassessment_id: str) -> dict[str, Any]:
+        directory = self._safe_directory("evidence_reassessments", reassessment_id)
+        manifest = self._verify_files(directory)
+        reassessment = json.loads(
+            (directory / "evidence_reassessment.json").read_text(encoding="utf-8")
+        )
+        return {
+            "schema_version": manifest["schema_version"],
+            "checksums_verified": True,
+            **reassessment,
+            "evidence_registry": json.loads(
+                (directory / "evidence_registry.json").read_text(encoding="utf-8")
+            ),
+            "economic_completeness": json.loads(
+                (directory / "economic_completeness.json").read_text(encoding="utf-8")
+            ),
+            "paper_operating_scenario": json.loads(
+                (directory / "paper_operating_scenario.json").read_text(encoding="utf-8")
+            ),
+            "paper_readiness_v2": json.loads(
+                (directory / "paper_readiness_v2.json").read_text(encoding="utf-8")
+            ),
+        }
+
+    def latest_evidence_for_run(self, run_id: str) -> dict[str, Any] | None:
+        root = self.root / "evidence_reassessments"
+        if not root.is_dir():
+            return None
+        matches: list[dict[str, Any]] = []
+        for directory in sorted(root.iterdir()):
+            if not directory.is_dir() or not _SAFE_ID.fullmatch(directory.name):
+                continue
+            try:
+                item = self.inspect_evidence_bundle(directory.name)
+            except RobustnessStorageError:
+                continue
+            if item.get("run_id") == run_id:
+                matches.append(item)
+        return max(matches, key=lambda item: str(item.get("created_at", "")), default=None)
+
     @staticmethod
     def _verify_files(directory: Path) -> dict[str, Any]:
         try:
             manifest = json.loads((directory / "checksums.json").read_text(encoding="utf-8"))
-            if manifest.get("schema_version") != ROBUSTNESS_EXPORT_SCHEMA_VERSION:
+            if manifest.get("schema_version") not in _SUPPORTED_ROBUSTNESS_SCHEMAS:
                 raise RobustnessStorageError("unsupported robustness export schema")
             files = manifest.get("files")
             if not isinstance(files, dict) or not files:

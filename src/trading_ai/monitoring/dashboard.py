@@ -147,6 +147,7 @@ def create_dashboard_app(
         ("costs", "costs"),
         ("validation", "validation"),
         ("robustness", "robustness"),
+        ("paper-readiness", "paper_readiness"),
         ("health", "health"),
     ):
         app.add_api_route(
