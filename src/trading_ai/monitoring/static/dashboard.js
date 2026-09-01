@@ -384,6 +384,27 @@ async function loadRun(runId) {
   }
 }
 
+async function loadBrokerInfrastructure() {
+  try {
+    const data = await fetchJson("/api/v1/broker/sessions");
+    renderMetrics(byId("broker-guard-summary"), {
+      mode: "READ_ONLY",
+      paper_execution_armed: data.paper_execution_armed,
+      live_hard_locked: data.live_hard_locked,
+      local_sessions: (data.sessions || []).length,
+    });
+    renderTable(byId("broker-sessions"), data.sessions || [], [
+      ["Session", "session_id"], ["Mode", "mode", "badge"],
+      ["Account", "account_masked"], ["Integrity", "integrity", "badge"],
+      ["Execution armed", "paper_execution_armed"],
+    ]);
+  } catch (error) {
+    renderMetrics(byId("broker-guard-summary"), {
+      status: "UNAVAILABLE", paper_execution_armed: false, live_hard_locked: true,
+    });
+  }
+}
+
 runSelect.addEventListener("change", () => {
   const target = runSelect.value ? `?run_id=${encodeURIComponent(runSelect.value)}` : window.location.pathname;
   window.location.assign(target);
@@ -400,3 +421,5 @@ if (selectedRun) {
   loadRun(selectedRun);
   window.setInterval(() => loadRun(selectedRun), 5000);
 }
+loadBrokerInfrastructure();
+window.setInterval(loadBrokerInfrastructure, 5000);

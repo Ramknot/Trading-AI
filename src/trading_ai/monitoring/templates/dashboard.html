@@ -41,12 +41,20 @@
       <a href="#regimes">Regimes</a><a href="#ml">ML</a>
       <a href="#risk">Risk</a><a href="#data-quality">Data Quality</a>
       <a href="#costs">Costs</a><a href="#validation">Validation</a><a href="#robustness">Robustness</a><a href="#paper-readiness">Paper Readiness</a><a href="#health">Health</a>
+      <a href="#broker-paper">Broker / Paper</a>
       <a href="#decisions">Decision Trace</a>
     </nav>
 
     <section id="overview" class="panel">
       <div class="panel-heading"><div><p class="eyebrow">SYSTEM / MODE / CAPITAL</p><h2>Overview</h2></div><span id="last-refresh">Static source</span></div>
       <div id="overview-cards" class="metric-grid empty-state">Select a run to load verified observations.</div>
+    </section>
+
+    <section id="broker-paper" class="panel">
+      <p class="eyebrow">IBKR TWS API · LOCAL SOCKET · READ ONLY</p><h2>Broker &amp; Paper Infrastructure</h2>
+      <div id="broker-guard-summary" class="metric-grid"></div>
+      <h3>Local Paper evidence sessions</h3><div id="broker-sessions"></div>
+      <p>Lot 9 exposes no BUY, SELL, CANCEL, ARM, Paper execution, or LIVE control. Authentication and 2FA stay in TWS/IB Gateway.</p>
     </section>
 
     <section id="paper-readiness" class="panel">

@@ -20,6 +20,8 @@ def test_monitoring_event_contract_reserves_all_engine_event_types() -> None:
         "ECONOMIC_RECOMPUTATION_STARTED", "ECONOMIC_RECOMPUTATION_COMPLETED",
         "DECISION_INVARIANCE_CHECK", "PAPER_READINESS_V3",
         "HUMAN_READINESS_REVIEW",
+        "BROKER_EVENT", "BROKER_RECONCILIATION", "PAPER_SESSION",
+        "PAPER_SHADOW_AUDIT",
     }
 
 

@@ -1,0 +1,35 @@
+# Example only. Copy to an ignored local path under data_local/paper/config/.
+# Never commit a real account identifier, hash salt, username, password, or token.
+
+[connection]
+host = "127.0.0.1"
+port = 7497
+client_id = 17
+
+[session]
+mode = "PAPER_READ_ONLY"
+paper_execution_armed = false
+
+[account]
+environment = "PAPER"
+allowed_hashes = ["0000000000000000000000000000000000000000000000000000000000000000"]
+hash_salt_env = "TRADING_AI_IBKR_ACCOUNT_HASH_SALT"
+
+[timeouts]
+request_seconds = 10.0
+heartbeat_seconds = 30.0
+max_clock_drift_seconds = 5.0
+
+[pacing]
+# Deliberately below IBKR's documented maximum of 50 client messages/second.
+max_messages_per_second = 20
+
+[orders]
+time_in_force = "DAY"
+
+[sdk]
+# The official SDK is installed separately after accepting IBKR's license.
+expected_version = "10.50"
+
+[contracts]
+path = "config/brokers/ibkr_contracts_balanced.toml"

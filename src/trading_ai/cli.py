@@ -27,6 +27,19 @@ from trading_ai.core.config import inspect_profile, load_runtime_settings
 from trading_ai.core.exceptions import TradingAIError
 from trading_ai.core.health import HealthReport, doctor
 from trading_ai.core.models import OrderSide
+from trading_ai.core.versioning import detect_git_commit
+from trading_ai.core.hashing import stable_hash
+from trading_ai.brokers.config import (
+    DEFAULT_IBKR_EXAMPLE,
+    load_ibkr_paper_config,
+)
+from trading_ai.brokers.exceptions import BrokerError
+from trading_ai.brokers.ibkr import IBKRContractResolver, IBKRPaperAdapter
+from trading_ai.brokers.ibkr.contracts import load_contract_specs
+from trading_ai.brokers.models import PaperMode
+from trading_ai.brokers.replay import PaperEventReplay, PaperShadowAudit
+from trading_ai.brokers.session import PaperTradingSession
+from trading_ai.brokers.storage import LocalPaperStore
 from trading_ai.costs import (
     BalancedTransactionCostEngine,
     CostError,
@@ -691,6 +704,41 @@ def build_parser() -> argparse.ArgumentParser:
     )
     monitoring_health.add_argument("--run-id")
     _add_store_arguments(monitoring_health)
+
+    broker_parser = commands.add_parser(
+        "broker", help="inspect local-only broker configuration without transmitting orders"
+    )
+    broker_commands = broker_parser.add_subparsers(dest="broker_command", required=True)
+    broker_config = broker_commands.add_parser(
+        "inspect-config", help="inspect the non-connectable example or one ignored local config"
+    )
+    broker_config.add_argument("--config", type=Path, default=DEFAULT_IBKR_EXAMPLE)
+    broker_config.add_argument("--json", action="store_true", dest="as_json")
+    broker_contracts = broker_commands.add_parser(
+        "contracts", help="inspect configuration-driven IBKR contract requirements"
+    )
+    broker_contracts.add_argument(
+        "--config", type=Path, default=Path("config/brokers/ibkr_contracts_balanced.toml")
+    )
+    broker_contracts.add_argument("--json", action="store_true", dest="as_json")
+
+    paper_parser = commands.add_parser(
+        "paper", help="connectivity/read-only Paper infrastructure; no manual order commands"
+    )
+    paper_commands = paper_parser.add_subparsers(dest="paper_command", required=True)
+    paper_connect = paper_commands.add_parser(
+        "connectivity-check",
+        help="explicitly connect, verify a Paper identity, read account state, then disconnect",
+    )
+    paper_connect.add_argument("--config", type=Path, required=True)
+    paper_connect.add_argument("--session-id", required=True)
+    _add_store_arguments(paper_connect)
+    paper_list = paper_commands.add_parser("list", help="list local Paper evidence bundles")
+    _add_store_arguments(paper_list)
+    for name in ("inspect", "replay", "shadow-audit"):
+        item = paper_commands.add_parser(name, help=f"{name} one local read-only Paper session")
+        item.add_argument("--session-id", required=True)
+        _add_store_arguments(item)
     return parser
 
 
@@ -1442,6 +1490,129 @@ def _run_monitoring(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_broker(args: argparse.Namespace) -> int:
+    if args.broker_command == "inspect-config":
+        config = load_ibkr_paper_config(args.config, allow_example=True)
+        payload = {
+            "adapter": "ibkr-tws-paper",
+            "adapter_version": "1.0",
+            "config_hash": config.config_hash,
+            "host": config.host,
+            "port": config.port,
+            "client_id": config.client_id,
+            "mode": config.mode.value,
+            "expected_environment": config.expected_environment.value,
+            "allowlisted_account_hash_count": len(config.allowed_account_hashes),
+            "connectable": config.connectable,
+            "paper_execution_armed": False,
+            "live_hard_locked": True,
+            "sdk": {
+                "expected_version": config.official_sdk_version,
+                "installed_implicitly": False,
+                "license_acceptance_required": True,
+            },
+        }
+        print(_render_payload(payload, args.as_json))
+        return 0
+    if args.broker_command == "contracts":
+        specs = load_contract_specs(args.config)
+        payload = {
+            "version": "1.0",
+            "config_hash": stable_hash(specs),
+            "contracts": [
+                {
+                    "symbol": item.symbol,
+                    "broker_symbol": item.broker_symbol,
+                    "con_id": item.con_id,
+                    "sec_type": item.sec_type,
+                    "exchange": item.exchange,
+                    "primary_exchange": item.primary_exchange,
+                    "currency": item.currency,
+                    "resolution": "REQUIRES_EXACT_IBKR_MATCH" if item.con_id is None else "PINNED",
+                }
+                for item in specs
+            ],
+            "first_match_fallback": False,
+        }
+        print(_render_payload(payload, args.as_json))
+        return 0
+    raise AssertionError(f"unhandled broker command: {args.broker_command}")
+
+
+def _run_paper(args: argparse.Namespace) -> int:
+    store = LocalPaperStore(args.data_root / "paper")
+    if args.paper_command == "list":
+        print(_render_payload(list(store.list_sessions()), args.as_json))
+        return 0
+    if args.paper_command == "inspect":
+        print(_render_payload(store.inspect(args.session_id), args.as_json))
+        return 0
+    if args.paper_command == "replay":
+        print(
+            _render_payload(
+                to_primitive(PaperEventReplay(store).replay(args.session_id)),
+                args.as_json,
+            )
+        )
+        return 0
+    if args.paper_command == "shadow-audit":
+        print(
+            _render_payload(
+                to_primitive(PaperShadowAudit(store).audit(args.session_id)),
+                args.as_json,
+            )
+        )
+        return 0
+    if args.paper_command == "connectivity-check":
+        config = load_ibkr_paper_config(args.config)
+        specs = load_contract_specs(config.contract_config)
+        resolver = IBKRContractResolver(
+            specs,
+            cache_path=args.data_root / "paper" / "contract_cache.json",
+        )
+        adapter = IBKRPaperAdapter(
+            config,
+            resolver,
+            session_id=args.session_id,
+        )
+        code_sha = detect_git_commit(Path(__file__).resolve().parents[2]) or "UNKNOWN"
+        session = PaperTradingSession(
+            adapter,
+            session_id=args.session_id,
+            mode=PaperMode.CONNECTIVITY_CHECK,
+            allowed_account_hashes=config.allowed_account_hashes,
+            config_hashes=tuple(
+                sorted(
+                    (
+                        ("broker", config.config_hash),
+                        ("contracts", stable_hash(specs)),
+                    )
+                )
+            ),
+            code_sha=code_sha,
+            store=store,
+        )
+        state = session.start()
+        payload = {
+            "status": "PASS",
+            "session_id": args.session_id,
+            "final_state": state.value,
+            "mode": PaperMode.CONNECTIVITY_CHECK.value,
+            "paper_execution_armed": False,
+            "live_hard_locked": True,
+            "account": (
+                adapter.account_identity.account_masked
+                if adapter.account_identity is not None else "UNAVAILABLE"
+            ),
+            "sdk_version": adapter.sdk_version,
+            "server_version": adapter.server_version,
+            "note": "connection/account read completed and disconnected; no order path was armed",
+        }
+        print(_render_payload(payload, args.as_json))
+        return 0
+    raise AssertionError(f"unhandled Paper command: {args.paper_command}")
+
+
 def _run_ml(args: argparse.Namespace) -> int:
     registry = LocalModelRegistry(args.data_root / "ml")
     if args.ml_command == "evaluate":
@@ -1890,6 +2061,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_dashboard(args)
         if args.command == "monitoring":
             return _run_monitoring(args)
+        if args.command == "broker":
+            return _run_broker(args)
+        if args.command == "paper":
+            return _run_paper(args)
     except (
         BacktestError,
         DataError,
@@ -1899,6 +2074,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         CostError,
         ValidationError,
         RobustnessError,
+        BrokerError,
         TradingAIError,
         ValueError,
     ) as exc:

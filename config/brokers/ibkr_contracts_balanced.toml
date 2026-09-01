@@ -1,0 +1,82 @@
+version = "1.0"
+source = "Trading AI Balanced universe; all contracts require exact IBKR detail verification"
+
+[contracts.SPY]
+sec_type = "STK"
+exchange = "SMART"
+primary_exchange = "ARCA"
+currency = "USD"
+
+[contracts.QQQ]
+sec_type = "STK"
+exchange = "SMART"
+primary_exchange = "NASDAQ"
+currency = "USD"
+
+[contracts.IWM]
+sec_type = "STK"
+exchange = "SMART"
+primary_exchange = "ARCA"
+currency = "USD"
+
+[contracts.AAPL]
+sec_type = "STK"
+exchange = "SMART"
+primary_exchange = "NASDAQ"
+currency = "USD"
+
+[contracts.MSFT]
+sec_type = "STK"
+exchange = "SMART"
+primary_exchange = "NASDAQ"
+currency = "USD"
+
+[contracts.NVDA]
+sec_type = "STK"
+exchange = "SMART"
+primary_exchange = "NASDAQ"
+currency = "USD"
+
+[contracts.AMZN]
+sec_type = "STK"
+exchange = "SMART"
+primary_exchange = "NASDAQ"
+currency = "USD"
+
+[contracts.GOOGL]
+sec_type = "STK"
+exchange = "SMART"
+primary_exchange = "NASDAQ"
+currency = "USD"
+
+[contracts.META]
+sec_type = "STK"
+exchange = "SMART"
+primary_exchange = "NASDAQ"
+currency = "USD"
+
+[contracts.ASML]
+sec_type = "STK"
+exchange = "SMART"
+primary_exchange = "NASDAQ"
+currency = "USD"
+
+[contracts.SAP]
+sec_type = "STK"
+exchange = "SMART"
+primary_exchange = "NYSE"
+currency = "USD"
+
+[contracts."MC.PA"]
+broker_symbol = "MC"
+sec_type = "STK"
+exchange = "SMART"
+primary_exchange = "SBF"
+currency = "EUR"
+
+[contracts."AIR.PA"]
+broker_symbol = "AIR"
+sec_type = "STK"
+exchange = "SMART"
+primary_exchange = "SBF"
+currency = "EUR"

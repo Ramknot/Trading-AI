@@ -21,6 +21,7 @@ from trading_ai.monitoring.exceptions import (
 from trading_ai.monitoring.service import MonitoringService
 from trading_ai.monitoring.source import BacktestMonitoringSource
 from trading_ai.monitoring.store import SQLiteMonitoringStore
+from trading_ai.monitoring.paper import LocalPaperMonitoringReader
 
 
 _LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
@@ -66,6 +67,8 @@ def create_dashboard_app(
         openapi_url="/api/v1/openapi.json",
     )
     app.state.monitoring_service = monitoring_service
+    paper_store = LocalPaperMonitoringReader(Path(data_root) / "paper")
+    app.state.paper_store = paper_store
     app.mount(
         "/static",
         StaticFiles(directory=str(package_dir / "static")),
@@ -208,6 +211,46 @@ def create_dashboard_app(
     @app.get("/api/v1/system-health")
     def system_health() -> dict[str, Any]:
         return monitoring_service.health_without_run()
+
+    @app.get("/api/v1/broker/sessions")
+    def broker_sessions() -> dict[str, Any]:
+        return {
+            "sessions": paper_store.list_sessions(),
+            "paper_execution_armed": False,
+            "live_hard_locked": True,
+        }
+
+    def paper_payload(session_id: str) -> dict[str, Any]:
+        return paper_store.inspect(session_id)
+
+    @app.get("/api/v1/broker/session")
+    def broker_session(session_id: str = Query(...)) -> dict[str, Any]:
+        return paper_payload(session_id)
+
+    @app.get("/api/v1/broker/orders")
+    def broker_orders(session_id: str = Query(...)) -> dict[str, Any]:
+        return {"orders": paper_payload(session_id)["orders"]}
+
+    @app.get("/api/v1/broker/executions")
+    def broker_executions(session_id: str = Query(...)) -> dict[str, Any]:
+        payload = paper_payload(session_id)
+        return {
+            "executions": payload["executions"],
+            "commissions": payload["commissions"],
+        }
+
+    @app.get("/api/v1/broker/reconciliation")
+    def broker_reconciliation(session_id: str = Query(...)) -> dict[str, Any]:
+        return {"reconciliation": paper_payload(session_id)["reconciliation"]}
+
+    @app.get("/api/v1/broker/paper-audit")
+    def broker_paper_audit(session_id: str = Query(...)) -> dict[str, Any]:
+        return {
+            "replay": paper_store.replay_summary(session_id),
+            "shadow_audit": paper_store.shadow_audit_summary(session_id),
+            "read_only": True,
+            "paper_execution_armed": False,
+        }
 
     return app
 

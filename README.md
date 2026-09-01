@@ -41,7 +41,7 @@ src/trading_ai/costs/             estimates, actual costs, reconciliation, econo
 src/trading_ai/risk/              mandatory gate, Balanced limits/state/guards/reporting
 src/trading_ai/validation/        immutable OOS/economic research validation reports
 src/trading_ai/execution/         sealed risk-gated ExecutionEngine
-src/trading_ai/brokers/           BrokerAdapter contract
+src/trading_ai/brokers/           Broker contracts, Paper boundary, reconciliation, IBKR adapter
 src/trading_ai/monitoring/        immutable events/snapshots, SQLite, API, local Dashboard
 src/trading_ai/backtesting/
   engine.py                       chronological event loop and safety validation
@@ -615,7 +615,7 @@ Section 31 remains distinct from IBKR Fixed commission, ordinary exchange/cleari
 
 The recomputed period is always labelled `CONSUMED_HOLDOUT_ECONOMIC_RECOMPUTATION`. It is retrospective analysis, never fresh OOS. Schema 1.9 stores the recomputation, affected fills/trades, recomputed equity, decision-invariance proof, evidence completeness, unchanged `PAPER_ESTIMATE_V1`, `PaperReadinessReviewV3`, and the initial `AWAITING_HUMAN_REVIEW` record in a checksum-verified bundle beside—never inside—the original export.
 
-`PaperReadinessReviewV3` uses the frozen minimum of 30 closed trades, positive net return/expectancy, profit factor above 1, maximum drawdown at most 10%, non-negative cash, complete-enough applicable transaction-cost evidence, a present PAPER operating scenario, and strict decision-chain invariance. `READY_FOR_REVIEW` means only that a person may assess whether to authorize development of Lot 9. It does not enable a broker, Paper session, order transmission, credentials, or `LIVE`. Human acceptance or rejection requires a separate local CLI action and a non-empty audited reason; generated results never approve themselves. This Lot deliberately ends with `AWAITING_HUMAN_REVIEW`.
+`PaperReadinessReviewV3` uses the frozen minimum of 30 closed trades, positive net return/expectancy, profit factor above 1, maximum drawdown at most 10%, non-negative cash, complete-enough applicable transaction-cost evidence, a present PAPER operating scenario, and strict decision-chain invariance. `READY_FOR_REVIEW` means only that a person may assess whether to authorize development of Lot 9. It does not enable a broker, Paper session, order transmission, credentials, or `LIVE`. Human acceptance or rejection requires a separate local CLI action and a non-empty audited reason; generated results never approve themselves. Lot 8.4 ended with `AWAITING_HUMAN_REVIEW`; the later explicit Lot 9 authorization changed only that audited review record and did not arm Paper execution.
 
 The real consumed-holdout recomputation finds eight covered US sells after the FY2026 effective date. Applying each verified USD 20.60-per-million rule at fill precision adds USD 0.99650280 exactly in the analytical ledger. Variable costs move from USD 466.55817886 to USD 467.55468166; net P&L before operating costs moves from USD 10,881.80249268745 to USD 10,880.80598988745; net return moves from 10.88180249% to 10.88080599%; maximum drawdown moves from 3.37285977% to 3.37339833%; profit factor moves from 3.02823661 to 3.02775236; and net expectancy moves from USD 202.94168713 to USD 202.91546337. The minimum cash remains non-negative and the +100% variable-cost stress remains positive. All decision layers are `STRICTLY_INVARIANT`, applicable transaction evidence is `COMPLETE_ESTIMATED` once the separate Paper operating range is included, and the resulting status is `READY_FOR_REVIEW / AWAITING_HUMAN_REVIEW`. These are retrospective consumed-period facts, not fresh validation or a forecast.
 
@@ -630,6 +630,72 @@ trading-ai validation human-review --readiness-id paper-readiness-v3-example --d
 ```
 
 The final acceptance command is documented for a future, separate user decision; it is not executed as part of Lot 8.4. The Dashboard displays original versus recomputed economics, Section 31 affected sells, decision invariance, operating ranges, survivorship and historical concentration warnings, Readiness V3, and human-review state. It remains read-only and contains no accept/reject or trading controls.
+
+## IBKR Broker Adapter & Paper Trading Infrastructure
+
+Lot 9 records the explicit human decision `HUMAN_REVIEW_ACCEPTED_FOR_LOT9_DEVELOPMENT` with an immutable reason that authorizes infrastructure development only. It does not authorize a Paper campaign, an order, a credential, or `LIVE`. `Paper Execution Armed` remains `NO`, and the repository deliberately ships no production authorization implementation capable of turning it on.
+
+### Official API, installation, and licence boundary
+
+`IBKRPaperAdapter` (`ibkr-tws-paper / 1.0`) implements the provider-neutral `BrokerAdapter` against the official asynchronous TWS API used with TWS or IB Gateway. The official SDK is not vendored and is not an implicit PyPI dependency: it must be installed separately from the [official TWS API download](https://interactivebrokers.github.io/) after the operator reviews and accepts the terms applicable to that distribution. The official download page describes its non-commercial licence for internal proprietary account-management tools, while the current [IBKR API product page](https://portal.interactivebrokers.com/en/trading/ib-api.php) also describes the latest TWS API as GPL. Because licence selection and redistribution consequences are operator-specific, Trading AI does not change its repository licence, redistribute the SDK, or use a third-party wrapper to avoid those terms.
+
+The implementation was reviewed against official TWS API 10.45 (stable, released 2026-03-30) and 10.50 (latest, released 2026-08-26); the example expects 10.50 and rejects an undeclared SDK version. IBKR recommends a contemporary TWS/IB Gateway build, and its [official Python installation guide](https://ibkrcampus.com/campus/trading-lessons/accessing-the-tws-python-api-source-code/) remains the setup source of record. Authentication, login, and 2FA stay inside TWS/IB Gateway and are never automated by this repository.
+
+### Hard Paper boundary and session modes
+
+The only intended order chain remains:
+
+```text
+Data → Features → Regime → Strategy → ML → Activation Policy → Portfolio
+     → Costs/Economic Gate → BalancedRiskEngine → PaperExecutionBoundary
+     → BrokerAdapter → IBKRPaperAdapter
+```
+
+`PaperExecutionBoundary` rechecks PAPER environment, Balanced profile, exact immutable Risk quantity, cost/economic lineage for new risk, explicit hashed account allowlist, fresh data, open market session, frozen component hashes, broker health, `IN_SYNC` reconciliation, and absence of emergency halt. LIVE or UNKNOWN accounts fail closed regardless of port, account naming, Risk approval, or any other favorable state. The default `DenyPaperSubmissionAuthorization` has no allowing counterpart under `src/`; therefore Lot 9 cannot transmit an order even if every read-only check passes.
+
+Three modes are modeled:
+
+- `CONNECTIVITY_CHECK`: connect, identify the explicitly allowlisted Paper account, read account/position/order/execution state, then disconnect; submit and cancel are impossible.
+- `PAPER_READ_ONLY`: keep local monitoring and reconciliation active; submit and cancel remain impossible.
+- `PAPER_EXECUTION_ARMED`: reserved for a later explicit lot and rejected by Lot 9 configuration, session construction, and immutable manifests.
+
+The local socket host is restricted to `127.0.0.1`, `localhost`, or `::1`. Ports are configuration-driven but are never considered proof that an account is Paper. `config/brokers/ibkr_paper.example.toml` is intentionally non-connectable: copy it to an ignored local path, provide a salted account hash and salt environment variable locally, and never commit an account ID, salt, username, password, token, or API setting containing one. `config/brokers/ibkr_contracts_balanced.toml` contains only non-sensitive, configuration-driven contract requirements. A contract must match symbol, security type, exchange/primary exchange, and currency exactly; zero or multiple candidates block instead of selecting the first response.
+
+### Asynchronous lifecycle, recovery, and reconciliation
+
+The official callback/event model is isolated behind `IBKRClientPort` and `OfficialIBAPIClient`: controlled reader thread, bounded request waits, heartbeat and clock-drift observation, bounded pacing, clean shutdown, and stable error-code normalization. MARKET and LIMIT are the only supported order types; `DAY` is the only Lot 9 TIF. STOP, STOP_LIMIT, implicit GTC, short, leverage, margin, and cancel-all are absent.
+
+Every logical request receives a stable `ClientOrderKey` derived from session, internal order, and immutable Risk decision. Internal order ID, client key, IBKR `orderId`, `permId`, and `execId` remain distinct. A submit interrupted before its outcome is known becomes `RECONCILIATION_REQUIRED`; it is never blindly retried. Duplicate callbacks and `execId` values are idempotent, partial fills are cumulative and may never exceed the Risk-approved quantity, and a corrected execution creates explicit lineage instead of overwriting the original. Missing commission reports remain `UNAVAILABLE`, never numeric zero; available reports are compared with the pre-trade estimate.
+
+Startup and every reconnect require account, cash, positions, open/completed orders, executions, and pending-state reconciliation before any session could be `READY`. Position, order, fill, cash, or account mismatch and external TWS activity produce `DRIFT` or `CRITICAL_DRIFT`; external activity is never assigned silently to a strategy sleeve. A restart restores only local mappings, then rereads the broker and reconciles—never resubmits the last request. A stale socket is not healthy. `PaperEmergencyHalt` stops all new transport without flattening, and only mapped system-owned Paper orders could be cancelled by a future authorized boundary.
+
+### Evidence, replay, and read-only monitoring
+
+`data_local/paper/` stores immutable session manifests, events, orders, executions, commission reports, account snapshots, reconciliation results, decision/outcome envelopes, and audits with SHA-256 manifests. It is ignored by Git. Tampering invalidates the evidence. `PaperDecisionEnvelope` retains the complete data/Feature/Regime/Signal/ML/Activation/Portfolio/Cost/Economic/Risk and broker-health inputs; `PaperOutcomeEnvelope` retains callback timeline, acknowledgements, partial/final fills, commissions, resulting account state, and reconciliation. Expected-versus-observed reporting covers fill/slippage/commission, decision-to-submit, submit-to-ack/fill, rejects, cancels, partial fills, reconnects, and drift.
+
+Replay deterministically reconstructs internal persisted evidence but explicitly does not claim to reproduce nondeterministic broker fills. `PaperShadowAudit` compares persisted decision-envelope hashes with independently recalculated hashes without fitting, calibrating, or changing any model or parameter. Until a complete recalculation set is supplied it reports `UNAVAILABLE`, never a false `IN_SYNC`; missing, extra, or different hashes become explicit drift. Broker data remains diagnostic unless a later explicit decision-source configuration says otherwise.
+
+The local Dashboard adds read-only Broker/Paper session, order, execution, commission, reconciliation, and audit endpoints. Its frontend consumes a broker-neutral monitoring reader, never imports or mutates `BrokerAdapter`, and offers no BUY, SELL, cancel, arm, or LIVE control.
+
+### Setup and read-only commands
+
+1. Install and authenticate an IBKR Paper account manually in TWS or IB Gateway, enable the local socket per the [official initial setup guide](https://interactivebrokers.github.io/tws-api/initial_setup.html), and install the official Python API package separately.
+2. Create an ignored local configuration from the example, preserve loopback-only host, add the exact salted Paper account hash, and set its salt through the named environment variable.
+3. Inspect configuration and contract requirements offline.
+4. Run an explicit connectivity check only when an authenticated local TWS/IB Gateway is available; it reads state and disconnects without allowing orders.
+5. Use `PAPER_READ_ONLY` only for future reconciliation/monitoring exercises. A Paper execution campaign belongs to Lot 10 and requires a separate human decision.
+
+```powershell
+trading-ai broker inspect-config --config config/brokers/ibkr_paper.example.toml --json
+trading-ai broker contracts --config config/brokers/ibkr_contracts_balanced.toml --json
+trading-ai paper connectivity-check --config data_local/config/ibkr_paper.toml --session-id paper-connectivity-001 --json
+trading-ai paper list --json
+trading-ai paper inspect --session-id paper-session-id --json
+trading-ai paper replay --session-id paper-session-id --json
+trading-ai paper shadow-audit --session-id paper-session-id --json
+```
+
+There is deliberately no CLI command to buy, sell, submit, cancel, arm, or enable LIVE. Without a locally authenticated and allowlisted Paper TWS/IB Gateway, the real connectivity smoke is `EXTERNAL_SETUP_REQUIRED`; the offline deterministic `FakeBroker` covers acknowledgement, rejection, cancellation, partial fills, corrections, commissions, disconnect uncertainty, restart recovery, duplicate callbacks, stale sessions, LIVE/UNKNOWN accounts, and external activity in CI. Lot 9 builds infrastructure only; it does not start Lot 10.
 
 ### Diagnostics, not retuning
 
@@ -755,7 +821,7 @@ Training replays the selected quant baseline without ML to build candidate examp
 
 ## Tests and CI
 
-The default suite is deterministic, fast, and independent of Yahoo Finance and the network. It uses `FakeDataProvider` plus synthetic sessions, invalid bars, gaps, corporate actions, feature/regime warm-ups, future-append invariance, exact-timestamp relative strength, all four baselines, two-axis classification, confirmation/transitions, activation matrices, Mean Reversion eligibility/exits/no-averaging, monotonic ML/policy/portfolio/risk sizing, chronological labels/splits/purge/embargo, all three tabular adapters, registry integrity/lifecycle, inference modes, multi-strategy batching/netting/diversification/turnover/FX, current-close sizing, fee-aware pending reservations, fixed/tiered/proportional/capped commissions, dated tax/FX/operating-cost states, point-in-time Section 31, Economic Gate behavior, OOS/stress/robustness validation, frozen-baseline/holdout governance, decision-funnel/drawdown/concentration/temporal/cost/uncertainty diagnostics, official evidence provenance/conflicts, exact/conservative/different tariff comparison, decision/cost invariance, economic recomputation, Paper operating ranges, human-review audit, consumed-holdout reassessment, point-in-time universe contracts, shared-ledger Risk integration, backward-compatible tamper-evident exports, immutable monitoring events, SQLite round trips, all Dashboard API/UI sections, schemas 1.0–1.9, path traversal/corruption refusal, full cost/decision lineage, local-only serving, and architecture audits. Synthetic patterns validate mechanics only; they are not evidence of market edge or profitability.
+The default suite is deterministic, fast, and independent of Yahoo Finance and the network. It uses `FakeDataProvider` plus synthetic sessions, invalid bars, gaps, corporate actions, feature/regime warm-ups, future-append invariance, exact-timestamp relative strength, all four baselines, two-axis classification, confirmation/transitions, activation matrices, Mean Reversion eligibility/exits/no-averaging, monotonic ML/policy/portfolio/risk sizing, chronological labels/splits/purge/embargo, all three tabular adapters, registry integrity/lifecycle, inference modes, multi-strategy batching/netting/diversification/turnover/FX, current-close sizing, fee-aware pending reservations, fixed/tiered/proportional/capped commissions, dated tax/FX/operating-cost states, point-in-time Section 31, Economic Gate behavior, OOS/stress/robustness validation, frozen-baseline/holdout governance, decision-funnel/drawdown/concentration/temporal/cost/uncertainty diagnostics, official evidence provenance/conflicts, exact/conservative/different tariff comparison, decision/cost invariance, economic recomputation, Paper operating ranges, human-review audit, consumed-holdout reassessment, point-in-time universe contracts, shared-ledger Risk integration, IBKR contract/account guards, idempotent order lifecycle, partial-fill/correction/commission ledger behavior, disconnect/restart/reconciliation fault injection, read-only Paper evidence/replay/shadow audit, backward-compatible tamper-evident exports, immutable monitoring events, SQLite round trips, all Dashboard API/UI sections, schemas 1.0–1.9, path traversal/corruption refusal, full cost/decision lineage, local-only serving, and architecture audits. Synthetic patterns validate mechanics only; they are not evidence of market edge, broker connectivity, or profitability.
 
 ```powershell
 .\.venv\Scripts\python -m compileall -q src
@@ -786,4 +852,4 @@ Expected safety matrix:
 
 ## Roadmap
 
-Lots 0 through 8.4 now provide foundations, universe/CI alignment, historical data, deterministic simulation, shared Feature Engine 1.1, four quantitative research baselines, the offline Balanced Risk Engine, two-axis rule-based regime classification, governed tabular ML scoring, deterministic multi-strategy portfolio construction, a local read-only Dashboard/observability boundary, configuration-driven transaction economics plus a research Validation Gate, frozen real-data robustness/holdout governance, official-evidence review, and immutable consumed-holdout economic recomputation with explicit human readiness governance. Lot 9 — Broker / Paper Trading remains a future manual decision; Lot 10 — Balanced Paper Validation and Lot 11 — Limited Live remain TODO. Neural, sequence, multimodal, real-time, and online-learning research remains PLANNED / LOCKED, and Aggressive Research remains LOCKED. See `PROJECT_STATE.md` for the authoritative implementation, campaign, and readiness statuses.
+Lots 0 through 9 now provide foundations, universe/CI alignment, historical data, deterministic simulation, shared Feature Engine 1.1, four quantitative research baselines, the offline Balanced Risk Engine, two-axis rule-based regime classification, governed tabular ML scoring, deterministic multi-strategy portfolio construction, a local read-only Dashboard/observability boundary, configuration-driven transaction economics plus a research Validation Gate, frozen real-data robustness/holdout governance, official-evidence review, immutable consumed-holdout economic recomputation with explicit human readiness governance, and a hard-locked IBKR TWS Paper adapter/reconciliation infrastructure. Paper execution remains unarmed and no campaign has started. Lot 10 — Balanced Paper Validation and Lot 11 — Limited Live remain TODO. Neural, sequence, multimodal, real-time, and online-learning research remains PLANNED / LOCKED, and Aggressive Research remains LOCKED. See `PROJECT_STATE.md` for the authoritative implementation, connectivity, and readiness statuses.

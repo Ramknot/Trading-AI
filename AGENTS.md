@@ -134,4 +134,14 @@ These rules apply to Codex and every future development agent working in this re
 - Human readiness approval may authorize only Lot 9 development and must never enable a broker, Paper session, or `LIVE`.
 - Human readiness review requires an explicit, immutable, audited reason.
 - Readiness metrics must never auto-approve progression; generated reviews remain `AWAITING_HUMAN_REVIEW` until a separate human action.
+- Lot 9 keeps `LIVE` hard-locked by construction; a LIVE, UNKNOWN, unverified, or non-allowlisted account must never reach broker submission.
+- Broker submission may occur only behind `PaperExecutionBoundary` after an immutable positive `RiskDecision`; direct adapter submission and manual order CLI commands are forbidden.
+- An unknown broker submission outcome must enter `RECONCILIATION_REQUIRED`; never retry an order blindly.
+- Startup and reconnect must verify the account and reconcile cash, positions, open/completed orders, executions, and pending state before new risk can be considered ready.
+- Paper-session Strategy, ML, Policy, Portfolio, Cost, Economic, and Risk configuration hashes must remain frozen; a change requires halt and restart.
+- Paper observations must never retune Strategy, Feature, Regime, ML, Portfolio, Cost, Economic, Risk, or Validation parameters automatically.
+- Duplicate broker callbacks and execution IDs must be idempotent; execution corrections require explicit lineage and must never overwrite history silently.
+- External or manually created broker activity must remain unattributed and force reconciliation/review.
+- Missing broker commissions or account values must remain `UNAVAILABLE`; they must never be interpreted as zero.
+- Paper execution remains unarmed until a later explicit lot and human decision; Lot 9 connectivity and read-only modes must never transmit or cancel orders.
 - Update `PROJECT_STATE.md` when a lot changes state.
