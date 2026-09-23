@@ -26,7 +26,7 @@
 - Paper Readiness Review V3: READY_FOR_REVIEW
 - Human Review: ACCEPTED_FOR_LOT9_DEVELOPMENT
 - Lot 9 — IBKR Broker Adapter & Paper Trading Infrastructure: DONE
-- IBKR Paper Connectivity Smoke: EXTERNAL_SETUP_REQUIRED
+- IBKR Paper Connectivity Smoke: PASS (2026-09-23, read-only; SDK 10.50.2 / TWS server 223)
 - Paper Execution Armed: NO
 - Lot 10 — Balanced Paper Validation: TODO
 - Lot 11 — Limited Live: TODO
@@ -95,4 +95,18 @@ Delivered: a separately versioned `balanced-economic-recomputation / 1.1` model 
 
 ## Lot 9 delivery summary
 
-Delivered: the provider-neutral `BrokerAdapter` lifecycle and an optional official TWS API `IBKRPaperAdapter` 1.0 isolated behind a fail-closed `PaperExecutionBoundary`; loopback-only, salted-hash Paper account verification; immutable unarmed session manifests; deterministic session/order state machines; exact contract resolution and tamper-evident cache; idempotent client-order keys; asynchronous callback queue, heartbeat, pacing and point-in-time broker timestamps; MARKET/LIMIT and DAY-only conversion; partial fills, explicit execution corrections and broker commission knowledge; cash-only long Paper ledger; startup/reconnect/restart reconciliation with external-activity and uncertain-submit halts; frozen component hashes; emergency halt without liquidation; decision/outcome envelopes, expected-versus-observed reporting, checksum-backed local Paper evidence, replay and shadow audit; a full fault-injectable offline `FakeBroker`; read-only Broker/Paper CLI and Dashboard endpoints. The explicit human review authorizes Lot 9 development only. No real IBKR Paper gateway was supplied, so connectivity remains `EXTERNAL_SETUP_REQUIRED`; no account was connected, no Paper campaign or order was started, no SDK was vendored, `Paper Execution Armed` remains `NO`, and Lot 10/11, Future ML Evolution, and Aggressive Research remain locked.
+Delivered: the provider-neutral `BrokerAdapter` lifecycle and an optional official TWS API `IBKRPaperAdapter` 1.0 isolated behind a fail-closed `PaperExecutionBoundary`; loopback-only, salted-hash Paper account verification; immutable unarmed session manifests; deterministic session/order state machines; exact contract resolution and tamper-evident cache; idempotent client-order keys; asynchronous callback queue, heartbeat, pacing and point-in-time broker timestamps; MARKET/LIMIT and DAY-only conversion; partial fills, explicit execution corrections and broker commission knowledge; cash-only long Paper ledger; startup/reconnect/restart reconciliation with external-activity and uncertain-submit halts; frozen component hashes; emergency halt without liquidation; decision/outcome envelopes, expected-versus-observed reporting, checksum-backed local Paper evidence, replay and shadow audit; a full fault-injectable offline `FakeBroker`; read-only Broker/Paper CLI and Dashboard endpoints. The explicit human review authorizes Lot 9 development only. At initial delivery no real IBKR Paper gateway was supplied, so connectivity was `EXTERNAL_SETUP_REQUIRED`. No Paper campaign or order was started, no SDK was vendored, `Paper Execution Armed` remains `NO`, and Lot 10/11, Future ML Evolution, and Aggressive Research remain locked.
+
+### Read-only connectivity follow-up — 2026-09-23
+
+The user authorized a read-only connection and explicitly confirmed the sole
+Paper identity. Official SDK 10.50.2 exposed a callback compatibility bug:
+`error` now includes a timestamp, and commissions use `commissionAndFeesReport`.
+Both forms are now handled with offline regression coverage; callback-reader
+failure invalidates connectivity without exposing broker message text. The
+authorized smoke read cash/equity (base currency EUR), positions, open/completed
+orders and executions, with no critical errors, then disconnected. Evidence
+integrity is verified in ignored local storage. No order was submitted or
+cancelled. This is a connectivity PASS, not an independent ledger-reconciliation
+PASS or Lot 10 approval. Its salted allowlist was temporary and no account ID,
+salt, SDK source, or local evidence was added to version control.

@@ -162,6 +162,17 @@ class OfficialIBAPIClient(IBKRClientPort):
         )
         self._dispatch_thread.start()
 
+    def _run_reader(self) -> None:
+        try:
+            self._app.run()
+        except Exception:
+            # SDK decoding/callback failures must invalidate the connection,
+            # without logging broker messages that may contain account data.
+            self._dispatcher_error = BrokerUnavailableError("IBKR callback reader failed")
+            self._ready.clear()
+            self._enqueue_event("ERROR", {"request_id": -1, "code": 504})
+            self._enqueue_event("DISCONNECTED", {})
+
     def _build_app(self) -> Any:
         try:
             package = importlib.import_module("ibapi")
@@ -306,6 +317,14 @@ class OfficialIBAPIClient(IBKRClientPort):
                     {"exec_id": str(report.execId), "commission": str(report.commission), "currency": str(report.currency)},
                 )
 
+            def commissionAndFeesReport(self, report) -> None:  # noqa: N802
+                # SDK 10.50 renamed both callback and amount. The broker's
+                # combined amount is ingested once, not added to legacy fees.
+                outer._enqueue_event(
+                    "COMMISSION_REPORT",
+                    {"exec_id": str(report.execId), "commission": str(report.commissionAndFees), "currency": str(report.currency)},
+                )
+
             def contractDetails(self, reqId, details) -> None:  # noqa: N802
                 contract = details.contract
                 outer._enqueue_event(
@@ -324,9 +343,19 @@ class OfficialIBAPIClient(IBKRClientPort):
             def currentTime(self, epoch: int) -> None:  # noqa: N802
                 outer._enqueue_event("CURRENT_TIME", {"epoch": int(epoch)})
 
-            def error(self, reqId, errorCode, errorString, advancedOrderRejectJson="") -> None:
-                del errorString, advancedOrderRejectJson
-                outer._enqueue_event("ERROR", {"request_id": int(reqId), "code": int(errorCode)})
+            def error(self, reqId, *args) -> None:
+                # Legacy: code, text[, reject JSON]. SDK 10.50:
+                # errorTime (epoch milliseconds), code, text[, reject JSON].
+                if len(args) in {2, 3} and isinstance(args[1], str):
+                    code, error_time = args[0], None
+                elif len(args) in {3, 4} and isinstance(args[2], str):
+                    error_time, code = int(args[0]), args[1]
+                else:
+                    raise ValueError("unsupported IBKR error callback signature")
+                payload = {"request_id": int(reqId), "code": int(code)}
+                if error_time is not None and error_time > 0:
+                    payload["error_time_ms"] = error_time
+                outer._enqueue_event("ERROR", payload)
 
             def connectionClosed(self) -> None:  # noqa: N802
                 outer._enqueue_event("DISCONNECTED", {})
@@ -350,7 +379,7 @@ class OfficialIBAPIClient(IBKRClientPort):
         if not self._app.isConnected():
             raise BrokerUnavailableError("IBKR TWS API socket connection was refused")
         self._thread = threading.Thread(
-            target=self._app.run,
+            target=self._run_reader,
             name="trading-ai-ibkr-callbacks",
             daemon=True,
         )

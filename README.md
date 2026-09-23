@@ -697,6 +697,20 @@ trading-ai paper shadow-audit --session-id paper-session-id --json
 
 There is deliberately no CLI command to buy, sell, submit, cancel, arm, or enable LIVE. Without a locally authenticated and allowlisted Paper TWS/IB Gateway, the real connectivity smoke is `EXTERNAL_SETUP_REQUIRED`; the offline deterministic `FakeBroker` covers acknowledgement, rejection, cancellation, partial fills, corrections, commissions, disconnect uncertainty, restart recovery, duplicate callbacks, stale sessions, LIVE/UNKNOWN accounts, and external activity in CI. Lot 9 builds infrastructure only; it does not start Lot 10.
 
+The 2026-09-23 read-only connectivity smoke passed with official Python SDK
+10.50.2 and TWS server 223 after the account was explicitly confirmed locally.
+The bridge accepts both legacy and timestamped error callbacks and the current
+`commissionAndFeesReport` callback. Callback-reader exceptions invalidate the
+connection instead of leaving a stale socket reported as connected. Raw error
+text and reject JSON are not persisted because they may contain account data.
+The smoke read account values, positions, open/completed orders and executions,
+then disconnected without submitting or cancelling orders. Its checksummed
+evidence remains under ignored `data_local/paper/`. This verifies connectivity
+and snapshot completeness only, not independent ledger reconciliation, market
+data entitlements, or permission to start an execution campaign. The temporary
+salted allowlist was scoped to that authorized check; subsequent sessions still
+require an explicit local allowlist and salt environment variable.
+
 ### Diagnostics, not retuning
 
 The read-only robustness layer consumes checksum-verified exports and never participates in signal, sizing, economics, Risk, or execution. It produces:
