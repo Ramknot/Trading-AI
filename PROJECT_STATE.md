@@ -28,7 +28,7 @@
 - Lot 9 — IBKR Broker Adapter & Paper Trading Infrastructure: DONE
 - IBKR Paper Connectivity Smoke: PASS (2026-09-23, read-only; SDK 10.50.2 / TWS server 223)
 - Paper Execution Armed: NO
-- Lot 9.1 — Paper Read-Only Soak & Reconciliation Gate: IN PROGRESS
+- Lot 9.1 — Paper Read-Only Soak & Reconciliation Gate: DONE
 - IBKR Read-Only Soak Smoke: NOT_RUN
 - IBKR Read-Only Soak Validation: NOT_RUN
 - Lot 10 Readiness: INSUFFICIENT_EVIDENCE
@@ -99,15 +99,17 @@ Delivered: a separately versioned `balanced-economic-recomputation / 1.1` model 
 
 ## Lot 9 delivery summary
 
-### Lot 9.1 local development status
+### Lot 9.1 delivery status
 
-Implemented locally: explicit read-only persistent observation, external broker
+Delivered: explicit read-only persistent observation, external broker
 bootstrap baseline, full state snapshots/reconciliation, bounded reconnect,
 server-time heartbeat and clock checks, immutable checksum-backed reports,
 smoke/soak duration gates, read-only Lot 10 readiness, offline fault fixtures,
 CLI and Dashboard/API views. Real smoke and soak campaigns have NOT_RUN during
 development. Prior connectivity PASS is preserved; Paper remains unarmed.
-Publication and the exact-commit CI are still required before Lot 9.1 is DONE.
+Implementation commit `0a0bf0175ad580fba162d66cb2307873f92f74e2` is published on
+`origin/main`; its GitHub Actions CI completed successfully on 2026-09-25:
+https://github.com/Ramknot/Trading-AI/actions/runs/36151184830
 Local validation on 2026-09-24: 656 offline tests passed (604 before changes),
 one network integration test deselected; compileall and pip check passed.
 The 99 dependency-deprecation warnings are unchanged from the baseline.
@@ -115,9 +117,11 @@ The accelerated one-hour empty-account fixture produced READ_ONLY_SOAK_PASS,
 122 snapshots and final IN_SYNC with zero submit/cancel calls; it remains
 synthetic mechanics evidence, not a real IBKR soak. Old CLI diagnostics and
 the new read-only CLI/API/HTML tests passed. No decision configuration changed.
-The environment denies writes to `.git/FETCH_HEAD` and `.git/index.lock`
-despite the granted Git-directory permission; no protection is bypassed.
-No Lot 9.1 commit/push/CI result exists yet. Lot 10 remains TODO.
+The initial sandbox Git-write restriction was handled by the user's manual
+commit and push, without bypassing protections. Technical delivery is complete;
+real read-only smoke/soak evidence is still NOT_RUN and Lot 10 readiness remains
+INSUFFICIENT_EVIDENCE. Lot 10 remains TODO; no connection or campaign is started
+by this delivery status.
 
 Delivered: the provider-neutral `BrokerAdapter` lifecycle and an optional official TWS API `IBKRPaperAdapter` 1.0 isolated behind a fail-closed `PaperExecutionBoundary`; loopback-only, salted-hash Paper account verification; immutable unarmed session manifests; deterministic session/order state machines; exact contract resolution and tamper-evident cache; idempotent client-order keys; asynchronous callback queue, heartbeat, pacing and point-in-time broker timestamps; MARKET/LIMIT and DAY-only conversion; partial fills, explicit execution corrections and broker commission knowledge; cash-only long Paper ledger; startup/reconnect/restart reconciliation with external-activity and uncertain-submit halts; frozen component hashes; emergency halt without liquidation; decision/outcome envelopes, expected-versus-observed reporting, checksum-backed local Paper evidence, replay and shadow audit; a full fault-injectable offline `FakeBroker`; read-only Broker/Paper CLI and Dashboard endpoints. The explicit human review authorizes Lot 9 development only. At initial delivery no real IBKR Paper gateway was supplied, so connectivity was `EXTERNAL_SETUP_REQUIRED`. No Paper campaign or order was started, no SDK was vendored, `Paper Execution Armed` remains `NO`, and Lot 10/11, Future ML Evolution, and Aggressive Research remain locked.
 
