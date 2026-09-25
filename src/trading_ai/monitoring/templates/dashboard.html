@@ -54,6 +54,11 @@
       <p class="eyebrow">IBKR TWS API · LOCAL SOCKET · READ ONLY</p><h2>Broker &amp; Paper Infrastructure</h2>
       <div id="broker-guard-summary" class="metric-grid"></div>
       <h3>Local Paper evidence sessions</h3><div id="broker-sessions"></div>
+      <h3>Read-only soak &amp; reconciliation</h3>
+      <label for="soak-select">Observation session</label><select id="soak-select"><option value="">No soak evidence</option></select>
+      <div id="soak-summary" class="metric-grid"></div>
+      <div id="soak-details" class="detail-list"></div>
+      <p>Broker bootstrap state is external, not strategy-owned. A smoke is not a long soak. No result arms execution.</p>
       <p>Lot 9 exposes no BUY, SELL, CANCEL, ARM, Paper execution, or LIVE control. Authentication and 2FA stay in TWS/IB Gateway.</p>
     </section>
 

@@ -392,6 +392,7 @@ class IBKRPaperAdapter(BrokerAdapter):
     def sync_state(self) -> ReconciliationState:
         if self._state is not BrokerConnectionState.CONNECTED:
             raise BrokerUnavailableError("cannot synchronize a disconnected IBKR adapter")
+        self._identify_account(self._client.account_ids)
         with self._lock:
             self._state_ready.clear()
             self._sync_pending = {
@@ -493,8 +494,11 @@ class IBKRPaperAdapter(BrokerAdapter):
 
     def health(self) -> BrokerHealth:
         now = datetime.now(timezone.utc)
+        if getattr(self._client, "callback_reader_failed", False):
+            self._critical_errors.add("CALLBACK_READER_FAILED")
         stale = (
-            self._last_heartbeat is None
+            not self._client.connected
+            or self._last_heartbeat is None
             or (now - self._last_heartbeat).total_seconds() > self.config.heartbeat_timeout_seconds
         )
         connection = BrokerConnectionState.STALE if stale and self._state is BrokerConnectionState.CONNECTED else self._state
@@ -514,6 +518,11 @@ class IBKRPaperAdapter(BrokerAdapter):
     def heartbeat(self) -> None:
         self._client.request_current_time()
 
+    @property
+    def last_server_time_at(self) -> datetime | None:
+        """Receipt of an explicit server-time reply, not just any callback."""
+        return getattr(self, "_last_server_time_at", None)
+
     def _replace_order(self, record: BrokerOrderRecord) -> None:
         with self._lock:
             self._orders[record.client_order_key] = record
@@ -531,7 +540,7 @@ class IBKRPaperAdapter(BrokerAdapter):
                     (
                         item.exec_id
                         for item in self._executions.values()
-                        if item.exec_id.rsplit(".", 1)[0] == root
+                        if item.exec_id.rsplit(".", 1)[0] == root and item.exec_id != exec_id
                     ),
                     None,
                 )
@@ -548,7 +557,8 @@ class IBKRPaperAdapter(BrokerAdapter):
                             and item.correction_of is None
                         ),
                         Decimal("0"),
-                    ) + Decimal(str(payload.get("quantity", "0")))
+                    ) + (Decimal(str(payload.get("quantity", "0")))
+                         if exec_id not in self._executions else Decimal("0"))
                     event_payload["is_partial"] = cumulative < order.quantity
             event = normalize_callback_event(
                 session_id=self.session_id,
@@ -603,6 +613,7 @@ class IBKRPaperAdapter(BrokerAdapter):
                 )
             elif kind == "CURRENT_TIME":
                 self._last_heartbeat = now
+                self._last_server_time_at = now
                 broker_time = datetime.fromtimestamp(int(payload["epoch"]), timezone.utc)
                 self._clock_drift_seconds = abs((now - broker_time).total_seconds())
                 if self._clock_drift_seconds > self.config.max_clock_drift_seconds:

@@ -96,6 +96,10 @@ class LocalPaperStore:
             manifest = json.loads((directory / "checksums.json").read_text(encoding="utf-8"))
             if manifest["schema_version"] != PAPER_STORE_SCHEMA_VERSION:
                 raise BrokerIntegrityError("unsupported Paper store schema")
+            if "session_manifest.json" not in manifest["files"]:
+                raise BrokerIntegrityError("Paper manifest is not checksummed")
+            if any(path.is_symlink() for path in directory.rglob("*")):
+                raise BrokerIntegrityError("Paper evidence must not contain symlinks")
             for name, expected in manifest["files"].items():
                 path = (directory / name).resolve()
                 if directory.resolve() not in path.parents or not path.is_file():
@@ -104,8 +108,8 @@ class LocalPaperStore:
                     raise BrokerIntegrityError(f"Paper artifact checksum mismatch: {name}")
             actual = {
                 str(path.relative_to(directory)).replace("\\", "/")
-                for path in directory.rglob("*.json")
-                if path.name != "checksums.json"
+                for path in directory.rglob("*")
+                if path.is_file() and path != directory / "checksums.json"
             }
             if actual != set(manifest["files"]):
                 raise BrokerIntegrityError("Paper store contains unmanifested JSON artifacts")
@@ -146,6 +150,7 @@ class LocalPaperStore:
         for category in (
             "events", "orders", "executions", "commissions", "snapshots",
             "reconciliation", "decisions", "outcomes", "audits",
+            "soak_config", "soak_baseline", "soak_snapshots", "soak_events", "soak_reports", "soak_readiness",
         ):
             category_path = directory / category
             records[category] = [

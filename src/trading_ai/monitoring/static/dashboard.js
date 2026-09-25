@@ -405,6 +405,42 @@ async function loadBrokerInfrastructure() {
   }
 }
 
+async function loadSoakEvidence() {
+  try {
+    const data = await fetchJson("/api/v1/broker/soak");
+    const select = byId("soak-select");
+    const previous = select.value;
+    select.replaceChildren();
+    (data.sessions || []).forEach(row => {
+      const option = document.createElement("option");
+      option.value = row.session_id; option.textContent = row.session_id;
+      select.appendChild(option);
+    });
+    if ((data.sessions || []).some(row => row.session_id === previous)) select.value = previous;
+    const view = (data.sessions || []).find(row => row.session_id === select.value) || {};
+    const snapshot = view.latest?.snapshot || {};
+    const account = snapshot.account || {};
+    const report = view.report || view.latest?.progress || {};
+    renderMetrics(byId("soak-summary"), {
+      state: view.status || "UNAVAILABLE", freshness: view.observation_freshness,
+      integrity: view.integrity, gate: view.gate?.status || "UNAVAILABLE",
+      evidence_level: view.gate?.evidence_level, account: account.account?.account_masked,
+      currency: account.account?.base_currency, cash: account.cash, equity: account.net_liquidation,
+      positions: account.positions?.length,
+      open_orders: snapshot.state?.orders?.filter(row => !["FILLED", "CANCELLED", "REJECTED"].includes(row.state)).length,
+      completed_orders: snapshot.state?.orders?.filter(row => ["FILLED", "CANCELLED", "REJECTED"].includes(row.state)).length,
+      executions: snapshot.state?.executions?.length, uptime_seconds: report.uptime_seconds,
+      reconnects: report.reconnects, drift_events: report.drift_events,
+      clock_drift_seconds: snapshot.health?.clock_drift_seconds,
+      reconciliation: view.reconciliation?.status, paper_execution_armed: false,
+    });
+    renderDetails(byId("soak-details"), {latest_snapshot: snapshot.timestamp,
+      health: snapshot.health, reconciliation: view.reconciliation, report: view.report});
+  } catch (error) {
+    renderMetrics(byId("soak-summary"), {status: "UNAVAILABLE", paper_execution_armed: false});
+  }
+}
+
 runSelect.addEventListener("change", () => {
   const target = runSelect.value ? `?run_id=${encodeURIComponent(runSelect.value)}` : window.location.pathname;
   window.location.assign(target);
@@ -423,3 +459,6 @@ if (selectedRun) {
 }
 loadBrokerInfrastructure();
 window.setInterval(loadBrokerInfrastructure, 5000);
+byId("soak-select").addEventListener("change", loadSoakEvidence);
+loadSoakEvidence();
+window.setInterval(loadSoakEvidence, 10000);

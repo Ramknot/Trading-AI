@@ -81,3 +81,23 @@ def test_reader_failure_invalidates_socket_without_exposing_exception():
         assert "private" not in str(client._dispatcher_error)
     finally:
         client.disconnect()
+
+
+def test_repeated_state_reads_release_only_data_subscriptions(monkeypatch):
+    """Account-wide reads must not bind, transmit or cancel any order."""
+    calls = []
+    names = ("reqAccountSummary", "reqPositions", "reqAllOpenOrders", "reqCompletedOrders",
+             "reqExecutions", "cancelAccountSummary", "cancelPositions")
+    app = SimpleNamespace(**{name: (lambda *args, name=name: calls.append((name, args))) for name in names})
+    client = OfficialIBAPIClient(lambda kind, payload: None)
+    monkeypatch.setattr(client, "_require", lambda: app)
+    monkeypatch.setattr(client._pacer, "wait", lambda: None)
+    monkeypatch.setitem(sys.modules, "ibapi.execution", SimpleNamespace(ExecutionFilter=lambda: "FILTER"))
+    client.request_state()
+    client.request_state()
+    assert [name for name, args in calls] == [
+        "reqAccountSummary", "reqPositions", "reqAllOpenOrders", "reqCompletedOrders", "reqExecutions",
+        "cancelAccountSummary", "cancelPositions",
+        "reqAccountSummary", "reqPositions", "reqAllOpenOrders", "reqCompletedOrders", "reqExecutions",
+    ]
+    assert all(args == (False,) for name, args in calls if name == "reqCompletedOrders")

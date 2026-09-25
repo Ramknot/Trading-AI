@@ -145,3 +145,10 @@ These rules apply to Codex and every future development agent working in this re
 - Missing broker commissions or account values must remain `UNAVAILABLE`; they must never be interpreted as zero.
 - Paper execution remains unarmed until a later explicit lot and human decision; Lot 9 connectivity and read-only modes must never transmit or cancel orders.
 - Update `PROJECT_STATE.md` when a lot changes state.
+- Read-only soak sessions must never submit, cancel, arm, or acquire an execution boundary.
+- Every reconnect requires account verification and complete broker-state reconciliation before observation resumes.
+- Broker bootstrap state is external evidence, never strategy-owned or assigned to a sleeve.
+- Incomplete snapshots and callback-reader failures must never be reported as healthy.
+- Soak observations must never retune decision systems or be confused with decision-market-data freshness validation.
+- Separate sessions must never be merged into a continuous uptime claim; simulated soak evidence is not real connectivity evidence.
+- Lot 10 readiness never auto-arms execution or authorizes a Paper campaign.

@@ -403,6 +403,7 @@ class OfficialIBAPIClient(IBKRClientPort):
         self._thread = None
         self._dispatch_thread = None
         self._ready.clear()
+        self._state_subscription_active = False
 
     @property
     def connected(self) -> bool:
@@ -412,6 +413,10 @@ class OfficialIBAPIClient(IBKRClientPort):
             and self._ready.is_set()
             and self._dispatcher_error is None
         )
+
+    @property
+    def callback_reader_failed(self) -> bool:
+        return self._dispatcher_error is not None
 
     @property
     def account_ids(self) -> tuple[str, ...]:
@@ -437,10 +442,18 @@ class OfficialIBAPIClient(IBKRClientPort):
 
     def request_state(self) -> None:
         app = self._require()
+        # Release data subscriptions only, never orders. A fresh subscription
+        # is needed for a complete new snapshot and its end callbacks.
+        if getattr(self, "_state_subscription_active", False):
+            app.cancelAccountSummary(9001)
+            self._pacer.wait(); app.cancelPositions()
+            self._pacer.wait()
         app.reqAccountSummary(9001, "All", "AccountType,NetLiquidation,TotalCashValue")
+        self._state_subscription_active = True
         self._pacer.wait(); app.reqPositions()
-        self._pacer.wait(); app.reqOpenOrders()
-        self._pacer.wait(); app.reqCompletedOrders(True)
+        # Account-wide snapshots, without binding or modifying manual orders.
+        self._pacer.wait(); app.reqAllOpenOrders()
+        self._pacer.wait(); app.reqCompletedOrders(False)
         execution_module = importlib.import_module("ibapi.execution")
         self._pacer.wait(); app.reqExecutions(9002, execution_module.ExecutionFilter())
 

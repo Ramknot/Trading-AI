@@ -40,6 +40,10 @@ from trading_ai.brokers.models import PaperMode
 from trading_ai.brokers.replay import PaperEventReplay, PaperShadowAudit
 from trading_ai.brokers.session import PaperTradingSession
 from trading_ai.brokers.storage import LocalPaperStore
+from trading_ai.brokers.soak.models import load_soak_config
+from trading_ai.brokers.soak.session import PaperReadOnlySession
+from trading_ai.monitoring.paper import LocalPaperMonitoringReader
+from trading_ai.monitoring.soak import soak_view
 from trading_ai.costs import (
     BalancedTransactionCostEngine,
     CostError,
@@ -735,6 +739,20 @@ def build_parser() -> argparse.ArgumentParser:
     _add_store_arguments(paper_connect)
     paper_list = paper_commands.add_parser("list", help="list local Paper evidence bundles")
     _add_store_arguments(paper_list)
+    soak_run = paper_commands.add_parser("read-only-run", help="explicit read-only soak; never sends orders")
+    soak_run.add_argument("--config", type=Path, required=True)
+    soak_run.add_argument("--soak-config", type=Path, default=Path("config/brokers/read_only_soak.toml"))
+    soak_run.add_argument("--session-id", required=True)
+    soak_run.add_argument("--previous-session-id")
+    soak_run.add_argument("--duration-minutes", type=float)
+    soak_run.add_argument("--snapshot-seconds", type=float)
+    _add_store_arguments(soak_run)
+    soak_list = paper_commands.add_parser("read-only-list", help="list local soak evidence")
+    _add_store_arguments(soak_list)
+    for name in ("read-only-status", "read-only-inspect", "read-only-report"):
+        item = paper_commands.add_parser(name, help="inspect local soak evidence without connecting")
+        item.add_argument("--session-id", required=True)
+        _add_store_arguments(item)
     for name in ("inspect", "replay", "shadow-audit"):
         item = paper_commands.add_parser(name, help=f"{name} one local read-only Paper session")
         item.add_argument("--session-id", required=True)
@@ -1541,6 +1559,38 @@ def _run_broker(args: argparse.Namespace) -> int:
 
 def _run_paper(args: argparse.Namespace) -> int:
     store = LocalPaperStore(args.data_root / "paper")
+    if args.paper_command.startswith("read-only-"):
+        reader = LocalPaperMonitoringReader(args.data_root / "paper")
+        if args.paper_command == "read-only-run":
+            from dataclasses import replace
+            from trading_ai.monitoring.store import SQLiteMonitoringStore
+
+            config = load_ibkr_paper_config(args.config)
+            soak_config = load_soak_config(args.soak_config)
+            overrides = {}
+            if args.duration_minutes is not None:
+                overrides["duration_seconds"] = args.duration_minutes * 60
+            if args.snapshot_seconds is not None:
+                overrides["snapshot_seconds"] = args.snapshot_seconds
+            soak_config = replace(soak_config, **overrides)
+            adapter = IBKRPaperAdapter(config, IBKRContractResolver(load_contract_specs(config.contract_config)),
+                                       session_id=args.session_id)
+            session = PaperReadOnlySession(
+                adapter, broker_config=config, config=soak_config, session_id=args.session_id,
+                code_sha=detect_git_commit(Path(__file__).resolve().parents[2]) or "UNKNOWN",
+                store=store, previous_session_id=args.previous_session_id,
+                monitoring_store=SQLiteMonitoringStore(args.data_root / "monitoring" / "monitoring.db"),
+            )
+            report = session.run()
+            print(_render_payload(to_primitive(report), args.as_json))
+            return 2 if report.gate.status == "FAIL" else 0
+        if args.paper_command == "read-only-list":
+            rows = [soak_view(reader, r["session_id"]) for r in reader.list_sessions()]
+            print(_render_payload([r for r in rows if r.get("events") or r["integrity"] == "ERROR"], args.as_json))
+            return 0
+        result = soak_view(reader, args.session_id)
+        print(_render_payload(result, args.as_json))
+        return 2 if result["integrity"] == "ERROR" else 0
     if args.paper_command == "list":
         print(_render_payload(list(store.list_sessions()), args.as_json))
         return 0

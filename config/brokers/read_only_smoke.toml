@@ -1,0 +1,11 @@
+# Infrastructure evidence only, never an order permission.
+duration_seconds = 900
+snapshot_seconds = 30
+smoke_minimum_seconds = 900
+soak_minimum_seconds = 3600
+heartbeat_seconds = 10
+reconnect_attempts = 3
+reconnect_delay_seconds = 10
+cash_tolerance = "0.01"
+equity_tolerance = "0.01"
+clock_warning_seconds = 2

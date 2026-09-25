@@ -864,6 +864,121 @@ Expected safety matrix:
 | PAPER | aggressive | Blocked: profile disabled and code-locked |
 | LIVE | balanced | Blocked: LIVE has no unlock mechanism |
 
-## Roadmap
+## Paper Read-Only Soak & Reconciliation Gate — Lot 9.1
+
+The explicit `PaperReadOnlySession` observes an already-authenticated local TWS or
+IB Gateway. Its broker port contains only connection, state-read and heartbeat
+operations: it has no submission/cancellation method or execution boundary.
+TWS's Read-Only API setting is recommended as an additional guard, not relied
+upon as Trading AI's only protection. `Paper Execution Armed=NO`; LIVE and
+Aggressive remain locked. No command below starts automatically during tests,
+Dashboard startup or installation. Lot 10 is not started or authorized.
+
+Flow: `IBKRPaperAdapter → read-only session → immutable snapshots/reconciliation
+→ local evidence + SQLite MonitoringStore → read-only Dashboard/API`.
+Strategies, Features, ML, Portfolio, Costs, and Risk are neither run nor changed.
+
+Startup verifies the salted local account allowlist and PAPER environment,
+reads account/cash/equity, positions, all visible open and completed orders,
+executions, available commissions, and server time. Only a complete initial
+reconciliation starts observation. The immutable initial baseline is explicitly
+`BROKER_BOOTSTRAP_READ_ONLY`: existing manual positions/orders are external,
+not adopted by strategies. Each subsequent snapshot compares against that
+baseline. Position/order/execution differences are never hidden by a tolerance;
+cash/equity tolerances default to 0.01 in the reported base currency, with no FX
+conversion. Equity variation is reported as unverified mark-to-market drift,
+not assumed to be a trading error or silently absorbed. Cash/position/execution
+changes halt with critical drift; external orders are recorded and require
+review. The conservative V1 does not automatically explain/adopt manual activity.
+
+Periodic state reads renew **data subscriptions only** (`cancelAccountSummary`,
+`cancelPositions`), never broker orders, to obtain fresh completion callbacks.
+Account-wide open-order requests do not bind manual TWS orders. Heartbeats wait
+for explicit server-time replies, not merely an open socket. SDK 10.50.2 and
+legacy commission/error callbacks remain supported. An unavailable commission
+remains UNAVAILABLE, never zero. These operations follow the official SDK's
+account-summary/position subscription and end-callback contracts; they do not
+subscribe to a trading market-data stream.
+
+Lifecycle: STARTING → CONNECTING → PAPER_VERIFIED → RECONCILING → SOAK_RUNNING;
+faults enter DEGRADED/HALTED, then STOPPING → COMPLETED/FAILED. Reconnect attempts
+are bounded (three, with ten-second delays by default) and must repeat identity
+verification and full reconciliation. Any account change, reader failure,
+unresolved critical error or exhausted retry budget fails closed. A recovered
+disconnect remains a WARNING for this evidence session. Ctrl+C and timeout
+request a final snapshot/reconciliation and always disconnect. A new process
+uses a **new** session ID; optional `--previous-session-id` links verified earlier
+evidence without merging durations or inventing crash continuity.
+
+The immutable report records observed duration, sampled uptime (observation
+span minus reconnect duration; not a guarantee between polls), snapshot counts,
+latencies/completeness, heartbeat gaps, disconnects/reconnects, callback errors,
+clock drift, external activity and final reconciliation. Default clock thresholds
+are warning above two seconds, failure above the existing broker five-second
+limit. Broker/account freshness is observed; future Lot 10 decision-data freshness
+is explicitly **NOT_EVALUATED**. Broker execution/completed-order history is
+limited by TWS visibility and retention, not claimed to be a complete account
+history. Unconfigured manual instruments, missing callbacks, day-roll history
+changes or unresolved commissions can prevent a clean result.
+
+`PaperReadOnlyReconciliationGate` 1.0 returns PASS, WARNING, FAIL or
+INSUFFICIENT_DURATION. PASS requires verified PAPER, complete initial/final
+IN_SYNC, valid evidence, no unresolved critical drift/reader failure, and no
+execution attempt. The shipped smoke profile runs 15 minutes with 30-second
+snapshots; it can produce only `READ_ONLY_SMOKE_PASS`. The soak profile runs
+120 minutes with 60-second snapshots; the minimum qualifying soak duration is
+60 minutes. Both request a heartbeat every ten seconds. Short runs do not become
+long-soak evidence; warnings do not count as clean soak PASS. FakeBroker runs
+use an accelerated clock and are **mechanics only**.
+
+### Explicit commands on the user's PC
+
+Prerequisites: authenticated **Paper** TWS/IB Gateway on loopback, official SDK
+10.50.2, a valid ignored `data_local/ibkr_paper.local.toml` with
+`mode="PAPER_READ_ONLY"` and `paper_execution_armed=false`, plus the matching
+salt environment variable and salted allowlist established locally. The earlier
+connectivity smoke's temporary salt/allowlist is not assumed to remain present.
+Never put credentials, raw account IDs or the salt in Git. No authentication
+automation or subscription purchase is performed.
+
+From the repository root, **only after choosing to start the read-only test**:
+
+```powershell
+# Smoke: 15 minutes, 30-second snapshots. Use a unique session ID each time.
+.\.venv\Scripts\trading-ai.exe paper read-only-run --config data_local/ibkr_paper.local.toml --soak-config config/brokers/read_only_smoke.toml --session-id readonly-smoke-001 --json
+
+# After reviewing the smoke: 120 minutes, 60-second snapshots.
+.\.venv\Scripts\trading-ai.exe paper read-only-run --config data_local/ibkr_paper.local.toml --soak-config config/brokers/read_only_soak.toml --session-id readonly-soak-001 --json
+
+.\.venv\Scripts\trading-ai.exe paper read-only-list --json
+.\.venv\Scripts\trading-ai.exe paper read-only-status --session-id readonly-soak-001 --json
+.\.venv\Scripts\trading-ai.exe paper read-only-inspect --session-id readonly-soak-001 --json
+.\.venv\Scripts\trading-ai.exe paper read-only-report --session-id readonly-soak-001 --json
+.\.venv\Scripts\trading-ai.exe dashboard serve --host 127.0.0.1 --port 8080
+```
+
+`--duration-minutes` and `--snapshot-seconds` may override observation timing,
+not eligibility thresholds. A snapshot cadence below 30 seconds is refused.
+Artifacts under ignored `data_local/paper/<session-id>/soak_*` retain UTC times,
+stable IDs, adapter/SDK/server versions and SHA-256 checksums. Existing records
+cannot be overwritten with different content. Corrupt, unmanifested or escaping
+paths fail verification. SHA-256 detects tampering relative to the local manifest;
+it is not a signed external attestation against an attacker replacing the entire
+bundle. Interrupted writes are not silently repaired into valid evidence.
+
+The Dashboard's **Read-only soak** section polls local evidence and displays
+state, freshness, masked account, cash/equity, positions/open/completed orders,
+executions, health, drift, clock, final gate and detailed report. Versioned GET-only
+endpoints are `/api/v1/broker/soak`, `/api/v1/broker/soak/latest`,
+`/api/v1/broker/soak/reconciliation`, `/api/v1/broker/soak/report`; the last three
+take `session_id`. There is no BUY/SELL/CANCEL/ARM/LIVE control.
+
+`Lot10ReadinessGate` returns READY_FOR_HUMAN_REVIEW only for real, intact,
+qualifying clean soak evidence with existing Lot 9/connectivity prerequisites.
+Fake evidence or a short smoke yields INSUFFICIENT_EVIDENCE. Safety failures
+yield NOT_READY. Even READY_FOR_HUMAN_REVIEW neither arms execution nor grants
+permission to launch a campaign: a separate human decision remains mandatory.
+
+## Roadmap status
 
 Lots 0 through 9 now provide foundations, universe/CI alignment, historical data, deterministic simulation, shared Feature Engine 1.1, four quantitative research baselines, the offline Balanced Risk Engine, two-axis rule-based regime classification, governed tabular ML scoring, deterministic multi-strategy portfolio construction, a local read-only Dashboard/observability boundary, configuration-driven transaction economics plus a research Validation Gate, frozen real-data robustness/holdout governance, official-evidence review, immutable consumed-holdout economic recomputation with explicit human readiness governance, and a hard-locked IBKR TWS Paper adapter/reconciliation infrastructure. Paper execution remains unarmed and no campaign has started. Lot 10 — Balanced Paper Validation and Lot 11 — Limited Live remain TODO. Neural, sequence, multimodal, real-time, and online-learning research remains PLANNED / LOCKED, and Aggressive Research remains LOCKED. See `PROJECT_STATE.md` for the authoritative implementation, connectivity, and readiness statuses.

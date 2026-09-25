@@ -71,7 +71,8 @@ def test_broker_and_paper_cli_are_read_only(capsys, tmp_path) -> None:
         action for action in paper._actions if action.dest == "paper_command"
     ).choices
     assert set(subcommands) == {
-        "connectivity-check", "list", "inspect", "replay", "shadow-audit"
+        "connectivity-check", "list", "inspect", "replay", "shadow-audit",
+        "read-only-run", "read-only-list", "read-only-status", "read-only-inspect", "read-only-report",
     }
     assert not {"buy", "sell", "submit", "cancel", "arm", "live"} & set(subcommands)
 

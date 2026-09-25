@@ -360,6 +360,11 @@ def test_adapter_preserves_external_limit_order_and_broker_timestamp(monkeypatch
         if event.event_type is BrokerEventType.PARTIAL_FILL
     )
     assert fill_event.broker_timestamp == execution.broker_timestamp
+    # A periodic history refresh is not a new fill or an execution correction.
+    adapter._on_callback("EXECUTION", fill_event.payload)
+    assert len(adapter.executions()) == 1
+    assert adapter.broker_events[-1].event_type is fill_event.event_type
+    assert "correction_of" not in adapter.broker_events[-1].payload
     adapter._on_callback(
         "EXECUTION",
         {

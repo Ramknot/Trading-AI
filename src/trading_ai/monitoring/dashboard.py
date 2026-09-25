@@ -22,6 +22,7 @@ from trading_ai.monitoring.service import MonitoringService
 from trading_ai.monitoring.source import BacktestMonitoringSource
 from trading_ai.monitoring.store import SQLiteMonitoringStore
 from trading_ai.monitoring.paper import LocalPaperMonitoringReader
+from trading_ai.monitoring.soak import soak_view
 
 
 _LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
@@ -222,6 +223,30 @@ def create_dashboard_app(
 
     def paper_payload(session_id: str) -> dict[str, Any]:
         return paper_store.inspect(session_id)
+
+    @app.get("/api/v1/broker/soak")
+    def broker_soaks() -> dict[str, Any]:
+        rows = []
+        for session in paper_store.list_sessions():
+            view = soak_view(paper_store, session["session_id"])
+            if view.get("events") or view["integrity"] == "ERROR":
+                rows.append(view)
+        return {"sessions": rows, "paper_execution_armed": False, "live_hard_locked": True}
+
+    @app.get("/api/v1/broker/soak/latest")
+    def broker_soak_latest(session_id: str = Query(...)) -> dict[str, Any]:
+        return soak_view(paper_store, session_id)
+
+    @app.get("/api/v1/broker/soak/reconciliation")
+    def broker_soak_reconciliation(session_id: str = Query(...)) -> dict[str, Any]:
+        view = soak_view(paper_store, session_id)
+        return {"integrity": view["integrity"], "reconciliation": view.get("reconciliation"),
+                "gate": view["gate"]}
+
+    @app.get("/api/v1/broker/soak/report")
+    def broker_soak_report(session_id: str = Query(...)) -> dict[str, Any]:
+        view = soak_view(paper_store, session_id)
+        return {"integrity": view["integrity"], "report": view.get("report"), "gate": view["gate"]}
 
     @app.get("/api/v1/broker/session")
     def broker_session(session_id: str = Query(...)) -> dict[str, Any]:

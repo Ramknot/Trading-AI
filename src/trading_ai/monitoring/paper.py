@@ -28,6 +28,7 @@ _CATEGORIES = (
     "decisions",
     "outcomes",
     "audits",
+    "soak_config", "soak_baseline", "soak_snapshots", "soak_events", "soak_reports", "soak_readiness",
 )
 
 
@@ -74,6 +75,10 @@ class LocalPaperMonitoringReader:
             declared = manifest["files"]
             if not isinstance(declared, dict):
                 raise MonitoringIntegrityError("invalid Paper checksum manifest")
+            if "session_manifest.json" not in declared:
+                raise MonitoringIntegrityError("Paper manifest is not checksummed")
+            if any(path.is_symlink() for path in directory.rglob("*")):
+                raise MonitoringIntegrityError("Paper evidence must not contain symlinks")
             for name, expected in declared.items():
                 path = (directory / str(name)).resolve()
                 if directory.resolve() not in path.parents or not path.is_file():
@@ -86,8 +91,8 @@ class LocalPaperMonitoringReader:
                     )
             actual = {
                 str(path.relative_to(directory)).replace("\\", "/")
-                for path in directory.rglob("*.json")
-                if path.name != "checksums.json"
+                for path in directory.rglob("*")
+                if path.is_file() and path != directory / "checksums.json"
             }
             if actual != set(declared):
                 raise MonitoringIntegrityError(
