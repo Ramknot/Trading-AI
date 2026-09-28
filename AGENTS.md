@@ -152,3 +152,8 @@ These rules apply to Codex and every future development agent working in this re
 - Soak observations must never retune decision systems or be confused with decision-market-data freshness validation.
 - Separate sessions must never be merged into a continuous uptime claim; simulated soak evidence is not real connectivity evidence.
 - Lot 10 readiness never auto-arms execution or authorizes a Paper campaign.
+- Every clock warning or failure must reference persisted heartbeat sample provenance.
+- Clock report maxima must cover the same samples and metric evaluated by the gate, not a snapshot subset.
+- Never hide transport, local scheduling, wall-clock changes, or server timestamp quantization uncertainty.
+- Never relax clock thresholds after observing a failed or warning session; diagnostic midpoint estimates do not override raw-offset safety checks.
+- Historical session evidence is immutable; missing heartbeat samples must remain unavailable and cannot be reconstructed as observed measurements.

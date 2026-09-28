@@ -6,13 +6,23 @@ from trading_ai.brokers.soak.models import GateResult, PaperReadOnlySoakReport, 
 
 class PaperReadOnlyReconciliationGate:
     name = "paper-read-only-reconciliation"
-    version = "1.0"
+    version = "1.1"
 
     def evaluate(self, *, config: SoakConfig, observed_seconds: float,
                  initial: str, final: str, verified: bool, integrity: bool,
                  failures: tuple[str, ...], warnings: tuple[str, ...],
-                 armed: bool = False, submit_calls: int = 0, cancel_calls: int = 0) -> GateResult:
+                 armed: bool = False, submit_calls: int = 0, cancel_calls: int = 0,
+                 clock_samples=(), clock_hard_threshold: float = 5) -> GateResult:
         bad = set(failures)
+        clock_warn = any(s.raw_server_time_offset_seconds > config.clock_warning_seconds for s in clock_samples)
+        clock_fail = any(s.raw_server_time_offset_seconds > clock_hard_threshold for s in clock_samples)
+        if ("CLOCK_DRIFT_WARNING" in warnings and not clock_warn
+                or "BROKER_CLOCK_DRIFT" in bad and not clock_fail):
+            bad.add("CLOCK_PROVENANCE_MISSING")
+        if clock_warn:
+            warnings = tuple(sorted(set(warnings) | {"CLOCK_DRIFT_WARNING"}))
+        if clock_fail:
+            bad.add("BROKER_CLOCK_DRIFT")
         if not verified:
             bad.add("ACCOUNT_NOT_VERIFIED")
         if not integrity:

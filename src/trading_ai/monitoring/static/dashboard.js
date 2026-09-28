@@ -421,6 +421,7 @@ async function loadSoakEvidence() {
     const snapshot = view.latest?.snapshot || {};
     const account = snapshot.account || {};
     const report = view.report || view.latest?.progress || {};
+    const clock = view.clock || {};
     renderMetrics(byId("soak-summary"), {
       state: view.status || "UNAVAILABLE", freshness: view.observation_freshness,
       integrity: view.integrity, gate: view.gate?.status || "UNAVAILABLE",
@@ -431,11 +432,19 @@ async function loadSoakEvidence() {
       completed_orders: snapshot.state?.orders?.filter(row => ["FILLED", "CANCELLED", "REJECTED"].includes(row.state)).length,
       executions: snapshot.state?.executions?.length, uptime_seconds: report.uptime_seconds,
       reconnects: report.reconnects, drift_events: report.drift_events,
-      clock_drift_seconds: snapshot.health?.clock_drift_seconds,
+      clock_evidence: clock.status || "UNAVAILABLE",
+      current_raw_offset_seconds: clock.clock_raw_offset_current_seconds,
+      max_raw_offset_seconds: clock.clock_raw_offset_max_seconds,
+      current_rtt_ms: clock.clock_rtt_current_ms, max_rtt_ms: clock.clock_rtt_max_ms,
+      clock_warning_threshold_seconds: clock.clock_warning_threshold_seconds,
+      clock_hard_threshold_seconds: clock.clock_hard_threshold_seconds,
+      clock_warning_count: clock.clock_warning_count, clock_peak_at: clock.clock_peak_at,
+      clock_last_warning_at: clock.clock_warning_last_at,
       reconciliation: view.reconciliation?.status, paper_execution_armed: false,
     });
     renderDetails(byId("soak-details"), {latest_snapshot: snapshot.timestamp,
-      health: snapshot.health, reconciliation: view.reconciliation, report: view.report});
+      health: snapshot.health, reconciliation: view.reconciliation, report: view.report,
+      clock: view.clock, clock_samples: view.clock_samples});
   } catch (error) {
     renderMetrics(byId("soak-summary"), {status: "UNAVAILABLE", paper_execution_armed: false});
   }

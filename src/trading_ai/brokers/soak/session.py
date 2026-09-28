@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Protocol
 
 from trading_ai.brokers.config import IBKRPaperConfig
+from trading_ai.brokers.clock import HeartbeatClockSample, clock_summary
 from trading_ai.brokers.exceptions import BrokerConfigurationError, BrokerUnavailableError
 from trading_ai.brokers.models import (
     BrokerEnvironment, BrokerConnectionState, BrokerAccountSnapshot, BrokerHealth, CommissionKnowledge,
@@ -31,7 +32,12 @@ class ReadOnlyBrokerPort(Protocol):
     def sync_state(self) -> ReconciliationState: ...
     def account_snapshot(self) -> BrokerAccountSnapshot: ...
     def health(self) -> BrokerHealth: ...
-    def heartbeat(self) -> None: ...
+    def heartbeat(self) -> str: ...
+    def expire_clock_request(self) -> None: ...
+    @property
+    def latest_clock_sample(self) -> HeartbeatClockSample | None: ...
+    @property
+    def clock_measurement_error(self) -> str | None: ...
     @property
     def last_server_time_at(self) -> datetime | None: ...
 
@@ -87,24 +93,31 @@ class PaperReadOnlySession:
         self._first_observation = self._last_observation = None
         self._last_heartbeat_mono = None
         self._run_started = False
+        self.clock_samples = []
+        self._pending_clock_samples = []
 
     def _event(self, kind, **payload):
         self._sequence += 1
         stamp = self.now()
         row = {"event_id": f"soak-{self._sequence:08d}", "session_id": self.session_id,
                "timestamp": stamp, "event_type": kind, "state": self.state.value,
-               "source": "paper-read-only-session", "source_version": "1.0", **payload}
+               "source": "paper-read-only-session", "source_version": "1.1", **payload}
         self._pending_events.append(row)
         if self.monitoring_store is not None:
             self.monitoring_store.append_event(MonitoringEvent(
                 event_id=self.session_id + "-" + row["event_id"], timestamp=stamp,
                 event_type=MonitoringEventType.PAPER_READ_ONLY_SOAK,
                 run_id=self.session_id, session_id=self.session_id,
-                source_component="paper-read-only-session", component_version="1.0",
+                source_component="paper-read-only-session", component_version="1.1",
                 payload_json=json.dumps(to_primitive(row), sort_keys=True), status=kind,
             ))
 
     def _flush_events(self):
+        if self._pending_clock_samples:
+            self.store.append(self.session_id, "soak_clock_samples", {
+                "schema_version": "1.1", "samples": tuple(self._pending_clock_samples),
+            }, record_id=self._pending_clock_samples[-1].request_id)
+            self._pending_clock_samples.clear()
         if self._pending_events:
             self.store.append(self.session_id, "soak_events", {"events": tuple(self._pending_events)},
                               record_id=self._pending_events[-1]["event_id"])
@@ -128,27 +141,65 @@ class PaperReadOnlySession:
             identity = self.broker.account_snapshot().account
         self._verify_identity(identity)
 
-    def _heartbeat(self):
+    def _clock_summary(self):
+        return clock_summary(tuple(self.clock_samples), self.config.clock_warning_seconds,
+                             self.broker_config.max_clock_drift_seconds)
+
+    def _check_callback_health(self, health):
+        serious = set(health.critical_errors) - {
+            "EXTERNAL_BROKER_ACTIVITY", "IBKR_CONNECTIVITY_LOST",
+            "IBKR_CONNECTIVITY_RESTORED_DATA_LOST", "IBKR_SOCKET_PORT_RESET",
+            "IBKR_SERVER_CONNECTIVITY_BROKEN", "IBKR_NOT_CONNECTED",
+        }
+        if serious:
+            self._callback_errors += 1
+            raise SoakFailure("BROKER_CRITICAL_ERROR")
+
+    def _heartbeat(self, *, allow_recent=False):
         if self.config.config_hash != self._frozen_config_hash:
             raise SoakFailure("FROZEN_CONFIG_CHANGED")
         started = self.monotonic()
-        previous = self.broker.last_server_time_at
-        self.broker.heartbeat()
-        while True:
+        # Snapshot immediately following a heartbeat reuses its already-evaluated
+        # sample. Avoid indistinguishable same-second CURRENT_TIME requests.
+        if (allow_recent and self.clock_samples and not self.broker.clock_measurement_error
+                and self.broker.latest_clock_sample == self.clock_samples[-1]
+                and 0 <= started - self.clock_samples[-1].receive_monotonic < 1.0):
             health = self.broker.health()
-            if health.critical_errors:
-                serious = set(health.critical_errors) - {
-                    "EXTERNAL_BROKER_ACTIVITY", "IBKR_CONNECTIVITY_LOST",
-                    "IBKR_CONNECTIVITY_RESTORED_DATA_LOST", "IBKR_SOCKET_PORT_RESET",
-                    "IBKR_SERVER_CONNECTIVITY_BROKEN", "IBKR_NOT_CONNECTED",
-                }
-                if serious:
-                    self._callback_errors += 1
-                    raise SoakFailure("BROKER_CRITICAL_ERROR")
+            self._check_callback_health(health)
+            if not health.stale and health.connection_state is BrokerConnectionState.CONNECTED:
+                return
+        try:
+            request_id = self.broker.heartbeat()
+        except BrokerUnavailableError:
+            if self.broker.clock_measurement_error:
+                self.warnings.add("CLOCK_MEASUREMENT_UNKNOWN")
+                self._event("CLOCK_MEASUREMENT_DISCARDED", reason=self.broker.clock_measurement_error)
+            raise
+        while True:
+            sample = self.broker.latest_clock_sample
+            if (sample is not None and sample.request_id == request_id
+                    and (not self.clock_samples or self.clock_samples[-1].sample_id != sample.sample_id)):
+                self.clock_samples.append(sample)
+                self._pending_clock_samples.append(sample)
+                self._event("CLOCK_SAMPLE_RECORDED", sample_id=sample.sample_id, clock=self._clock_summary())
+                if sample.raw_server_time_offset_seconds > self.config.clock_warning_seconds:
+                    self.warnings.add("CLOCK_DRIFT_WARNING")
+                if sample.raw_server_time_offset_seconds > self.broker_config.max_clock_drift_seconds:
+                    raise SoakFailure("BROKER_CLOCK_DRIFT")
+            if self.broker.clock_measurement_error:
+                self.warnings.add("CLOCK_MEASUREMENT_UNKNOWN")
+                self._event("CLOCK_MEASUREMENT_DISCARDED", reason=self.broker.clock_measurement_error,
+                            request_id=request_id)
+                raise SoakFailure("CLOCK_MEASUREMENT_UNKNOWN")
+            health = self.broker.health()
+            self._check_callback_health(health)
             if (not health.stale and health.connection_state is BrokerConnectionState.CONNECTED
-                and self.broker.last_server_time_at is not None and self.broker.last_server_time_at != previous):
+                and sample is not None and sample.request_id == request_id):
                 break
             if self.monotonic() - started >= self.broker_config.request_timeout_seconds:
+                self.broker.expire_clock_request()
+                self.warnings.add("CLOCK_MEASUREMENT_UNKNOWN")
+                self._event("CLOCK_MEASUREMENT_DISCARDED", reason="CLOCK_REQUEST_TIMED_OUT", request_id=request_id)
                 self.stale_events += 1
                 self._transition(SoakState.DEGRADED)
                 self._event("SESSION_STALE")
@@ -158,13 +209,7 @@ class PaperReadOnlySession:
         if self._last_heartbeat_mono is not None:
             self.max_heartbeat_gap = max(self.max_heartbeat_gap, instant - self._last_heartbeat_mono)
         self._last_heartbeat_mono = instant
-        if health.clock_drift_seconds is None:
-            self.warnings.add("SERVER_TIME_UNAVAILABLE")
-        elif health.clock_drift_seconds > self.broker_config.max_clock_drift_seconds:
-            raise SoakFailure("BROKER_CLOCK_DRIFT")
-        elif health.clock_drift_seconds > self.config.clock_warning_seconds:
-            self.warnings.add("CLOCK_DRIFT_WARNING")
-        self._event("HEARTBEAT_OK", health=to_primitive(health))
+        self._event("HEARTBEAT_OK", health=to_primitive(health), sample_id=sample.sample_id)
 
     def _capture(self, *, final=False):
         if getattr(self.broker, "config", self.broker_config) != self.broker_config:
@@ -175,7 +220,7 @@ class PaperReadOnlySession:
         state = self.broker.sync_state()  # Must wait for all five completion callbacks.
         account = self.broker.account_snapshot()
         self._verify_identity(account.account)
-        self._heartbeat()
+        self._heartbeat(allow_recent=True)
         health = self.broker.health()
         commissions = tuple(getattr(self.broker, "commission_reports", ()))
         missing = []
@@ -218,6 +263,8 @@ class PaperReadOnlySession:
         self.store.append(self.session_id, "soak_snapshots", {
             "snapshot_id": snapshot.snapshot_id, "snapshot": snapshot,
             "reconciliation": reconciliation, "broker_events": events,
+            "clock": self._clock_summary(),
+            "clock_sample_id": self.clock_samples[-1].sample_id if self.clock_samples else None,
             "progress": {
                 "observed_seconds": (self.monotonic() - self._first_observation
                                      if self._first_observation is not None else 0.0),
@@ -304,7 +351,9 @@ class PaperReadOnlySession:
         ))
         self.store.append(self.session_id, "soak_config", {
             "config": self.config, "previous_session_id": self.previous_session_id,
-            "continuity_claimed": False,
+            "continuity_claimed": False, "soak_schema_version": "1.1",
+            "clock_gate_metric": "raw_server_time_offset_seconds",
+            "clock_hard_threshold_seconds": self.broker_config.max_clock_drift_seconds,
         }, record_id="frozen")
         self._event("READ_ONLY_SOAK_STARTED")
         try:
@@ -346,6 +395,12 @@ class PaperReadOnlySession:
                 self.broker.disconnect()
             except Exception:
                 self.failures.add("DISCONNECT_FAILED")
+            # Disconnect drains the SDK callback queue. A late ambiguous reply
+            # must not disappear merely because the last snapshot was complete.
+            if self.broker.clock_measurement_error and "CLOCK_MEASUREMENT_UNKNOWN" not in self.warnings:
+                self.warnings.add("CLOCK_MEASUREMENT_UNKNOWN")
+                self._event("CLOCK_MEASUREMENT_DISCARDED", reason=self.broker.clock_measurement_error,
+                            phase="SHUTDOWN")
             self._transition(SoakState.FAILED if self.failures else SoakState.COMPLETED)
         end = self.now()
         elapsed = self.monotonic() - began
@@ -359,8 +414,10 @@ class PaperReadOnlySession:
             config=self.config, observed_seconds=observed, initial=initial, final=final,
             verified=self._verified, integrity=True, failures=tuple(sorted(self.failures)),
             warnings=tuple(sorted(self.warnings)),
+            clock_samples=tuple(self.clock_samples),
+            clock_hard_threshold=self.broker_config.max_clock_drift_seconds,
         )
-        drifts = [s.health.clock_drift_seconds for s in self.snapshots if s.health.clock_drift_seconds is not None]
+        clocks = self._clock_summary()
         report = PaperReadOnlySoakReport(
             self.session_id, start, end, elapsed, observed, max(0.0, observed - self.reconnect_duration),
             len(self.snapshots), self.reconnects, self.disconnects, self.reconnect_duration,
@@ -368,11 +425,12 @@ class PaperReadOnlySession:
             max((s.latency_seconds for s in self.snapshots), default=0.0), self._callback_errors,
             sum(r.status is not ReconciliationStatus.IN_SYNC for r in self.reconciliations),
             sum(r.status is ReconciliationStatus.CRITICAL_DRIFT for r in self.reconciliations),
-            sum(r.external_activity for r in self.reconciliations), max(drifts) if drifts else None,
+            sum(r.external_activity for r in self.reconciliations), clocks["clock_raw_offset_max_seconds"],
             sum(not s.missing for s in self.snapshots) / len(self.snapshots) if self.snapshots else 0.0,
             "ERROR" if gate.status == "FAIL" else "WARNING" if self.warnings else "HEALTHY",
             initial, final, self._verified, "VERIFIED", self.state, gate, self.config.config_hash,
             self.previous_session_id, tuple(sorted(self.warnings)),
+            **clocks,
         )
         self.store.append(self.session_id, "soak_reports", report, record_id="final")
         readiness = Lot10ReadinessGate().evaluate(

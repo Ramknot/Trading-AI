@@ -5,11 +5,13 @@ from __future__ import annotations
 import hashlib
 import os
 import threading
+import time
 from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
 from trading_ai.brokers.base import BrokerAdapter
+from trading_ai.brokers.clock import ClockRequestTracker
 from trading_ai.brokers.config import IBKRPaperConfig
 from trading_ai.brokers.exceptions import (
     BrokerUnavailableError,
@@ -93,6 +95,7 @@ class IBKRPaperAdapter(BrokerAdapter):
         self._next_request_id = 10000
         self._last_heartbeat: datetime | None = None
         self._clock_drift_seconds: float | None = None
+        self._clock_tracker = ClockRequestTracker(session_id, timeout_seconds=config.request_timeout_seconds)
         self._critical_errors: set[str] = set()
         self._idempotency = IdempotencyRegistry()
         self._state_ready = threading.Event()
@@ -147,6 +150,9 @@ class IBKRPaperAdapter(BrokerAdapter):
             if self._state is not BrokerConnectionState.DISCONNECTED:
                 raise BrokerUnavailableError("IBKR adapter is already connecting or connected")
             self._state = BrokerConnectionState.CONNECTING
+            self._clock_tracker.reset_connection()
+            self._clock_drift_seconds = None
+            self._critical_errors.discard("CLOCK_MEASUREMENT_UNKNOWN")
         try:
             self._client.connect(
                 self.config.host,
@@ -515,8 +521,25 @@ class IBKRPaperAdapter(BrokerAdapter):
             clock_drift_seconds=self._clock_drift_seconds,
         )
 
-    def heartbeat(self) -> None:
-        self._client.request_current_time()
+    def heartbeat(self) -> str:
+        request_id = self._clock_tracker.begin()
+        try:
+            self._client.request_current_time()
+        except Exception:
+            self._clock_tracker.invalidate("CLOCK_REQUEST_SEND_UNCERTAIN")
+            raise
+        return request_id
+
+    @property
+    def latest_clock_sample(self):
+        return self._clock_tracker.latest
+
+    @property
+    def clock_measurement_error(self):
+        return self._clock_tracker.error
+
+    def expire_clock_request(self):
+        self._clock_tracker.invalidate("CLOCK_REQUEST_TIMED_OUT")
 
     @property
     def last_server_time_at(self) -> datetime | None:
@@ -530,6 +553,7 @@ class IBKRPaperAdapter(BrokerAdapter):
 
     def _on_callback(self, kind: str, payload: dict[str, object]) -> None:
         now = datetime.now(timezone.utc)
+        received_mono = time.monotonic()
         with self._lock:
             self._last_heartbeat = now
             event_payload = dict(payload)
@@ -614,10 +638,15 @@ class IBKRPaperAdapter(BrokerAdapter):
             elif kind == "CURRENT_TIME":
                 self._last_heartbeat = now
                 self._last_server_time_at = now
-                broker_time = datetime.fromtimestamp(int(payload["epoch"]), timezone.utc)
-                self._clock_drift_seconds = abs((now - broker_time).total_seconds())
-                if self._clock_drift_seconds > self.config.max_clock_drift_seconds:
-                    self._critical_errors.add("BROKER_CLOCK_DRIFT")
+                sample = self._clock_tracker.receive(payload["epoch"], received_at=now,
+                                                     receive_monotonic=received_mono)
+                if sample is not None:
+                    self._clock_drift_seconds = sample.raw_server_time_offset_seconds
+                    if self._clock_drift_seconds > self.config.max_clock_drift_seconds:
+                        self._critical_errors.add("BROKER_CLOCK_DRIFT")
+                elif self._clock_tracker.error:
+                    self._clock_drift_seconds = None
+                    self._critical_errors.add("CLOCK_MEASUREMENT_UNKNOWN")
             elif kind == "ERROR":
                 normalized = normalize_ibkr_error(int(payload["code"]))
                 if normalized.connectivity_lost:

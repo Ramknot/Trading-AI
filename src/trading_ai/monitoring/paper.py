@@ -29,6 +29,7 @@ _CATEGORIES = (
     "outcomes",
     "audits",
     "soak_config", "soak_baseline", "soak_snapshots", "soak_events", "soak_reports", "soak_readiness",
+    "soak_clock_samples",
 )
 
 

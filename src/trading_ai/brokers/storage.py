@@ -151,6 +151,7 @@ class LocalPaperStore:
             "events", "orders", "executions", "commissions", "snapshots",
             "reconciliation", "decisions", "outcomes", "audits",
             "soak_config", "soak_baseline", "soak_snapshots", "soak_events", "soak_reports", "soak_readiness",
+            "soak_clock_samples",
         ):
             category_path = directory / category
             records[category] = [

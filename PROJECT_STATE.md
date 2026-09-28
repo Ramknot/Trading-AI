@@ -29,7 +29,10 @@
 - IBKR Paper Connectivity Smoke: PASS (2026-09-23, read-only; SDK 10.50.2 / TWS server 223)
 - Paper Execution Armed: NO
 - Lot 9.1 — Paper Read-Only Soak & Reconciliation Gate: DONE
-- IBKR Read-Only Soak Smoke: NOT_RUN
+- Lot 9.1.1 — IBKR Clock Drift Observability & Measurement Fix: IN PROGRESS
+- IBKR Read-Only Soak Smoke: WARNING / NO_PASS (user-reported session readonly-smoke-20260927-212134; original evidence immutable)
+- Clock Observability Fix: IN PROGRESS
+- New Read-Only Smoke Required: YES
 - IBKR Read-Only Soak Validation: NOT_RUN
 - Lot 10 Readiness: INSUFFICIENT_EVIDENCE
 - Lot 10 — Balanced Paper Validation: TODO
@@ -119,9 +122,41 @@ synthetic mechanics evidence, not a real IBKR soak. Old CLI diagnostics and
 the new read-only CLI/API/HTML tests passed. No decision configuration changed.
 The initial sandbox Git-write restriction was handled by the user's manual
 commit and push, without bypassing protections. Technical delivery is complete;
-real read-only smoke/soak evidence is still NOT_RUN and Lot 10 readiness remains
+at that delivery real read-only smoke/soak evidence was still NOT_RUN and Lot 10 readiness remained
 INSUFFICIENT_EVIDENCE. Lot 10 remains TODO; no connection or campaign is started
 by this delivery status.
+
+### Lot 9.1.1 clock observability correction
+
+The user-reported 2026-09-27 smoke `readonly-smoke-20260927-212134` observed
+900.866 seconds, initial/final IN_SYNC, zero critical/external drift, reconnects,
+stale events and submit/cancel calls, but returned CLOCK_DRIFT_WARNING/NO_PASS
+while the snapshot-only maximum was 1.879262 seconds. The root cause is the
+mismatched populations: every heartbeat was evaluated, only snapshots were
+aggregated. The original bundle is not available in this workspace; no missing
+historical heartbeat peak has been fabricated or historical evidence modified.
+The historical WARNING/NO_PASS remains unchanged.
+
+Implementation: immutable integer-epoch heartbeat samples with UTC/monotonic
+request and receipt times, monotonic RTT, signed raw offset, conservative absolute
+raw gate metric, diagnostic midpoint/uncertainty and one-second server resolution;
+single-flight/no-blind-retry clock tracking; checksummed batched persistence;
+soak schema/gate 1.1 with all-heartbeat max/p95 and warning/failure provenance;
+read-only report/API/Dashboard metrics and unavailable legacy fields.
+Clock warning >2 seconds and hard failure >5 seconds remain unchanged. No
+Strategy/ML/Portfolio/Risk/Cost/Economic configuration or execution lock changed.
+New real smoke and qualifying soak are required, never launched by this lot.
+Lot 10 readiness remains INSUFFICIENT_EVIDENCE; Lot 10 remains TODO.
+
+Local validation on 2026-09-28: 689 offline tests passed (656 before this fix,
+33 new clock-observability tests); one integration test deselected. Compileall
+and pip check passed. The 99 dependency-deprecation warnings match the baseline.
+The 2.4-second intermediate-heartbeat / 1.8-second snapshot regression now reports
+the true evaluated maximum and its persisted sample ID. Tests also cover hard
+failure, monotonic RTT, uncertainty, quantization, duplicates/late/overlapping
+replies, shutdown ambiguity, reader failure, legacy bundles, tampering, CLI/API,
+and MonitoringStore. All read-only fake sessions assert zero submit/cancel calls.
+No real TWS connection or new smoke was run during development.
 
 Delivered: the provider-neutral `BrokerAdapter` lifecycle and an optional official TWS API `IBKRPaperAdapter` 1.0 isolated behind a fail-closed `PaperExecutionBoundary`; loopback-only, salted-hash Paper account verification; immutable unarmed session manifests; deterministic session/order state machines; exact contract resolution and tamper-evident cache; idempotent client-order keys; asynchronous callback queue, heartbeat, pacing and point-in-time broker timestamps; MARKET/LIMIT and DAY-only conversion; partial fills, explicit execution corrections and broker commission knowledge; cash-only long Paper ledger; startup/reconnect/restart reconciliation with external-activity and uncertain-submit halts; frozen component hashes; emergency halt without liquidation; decision/outcome envelopes, expected-versus-observed reporting, checksum-backed local Paper evidence, replay and shadow audit; a full fault-injectable offline `FakeBroker`; read-only Broker/Paper CLI and Dashboard endpoints. The explicit human review authorizes Lot 9 development only. At initial delivery no real IBKR Paper gateway was supplied, so connectivity was `EXTERNAL_SETUP_REQUIRED`. No Paper campaign or order was started, no SDK was vendored, `Paper Execution Armed` remains `NO`, and Lot 10/11, Future ML Evolution, and Aggressive Research remain locked.
 

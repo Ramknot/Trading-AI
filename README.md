@@ -921,7 +921,7 @@ limited by TWS visibility and retention, not claimed to be a complete account
 history. Unconfigured manual instruments, missing callbacks, day-roll history
 changes or unresolved commissions can prevent a clean result.
 
-`PaperReadOnlyReconciliationGate` 1.0 returns PASS, WARNING, FAIL or
+`PaperReadOnlyReconciliationGate` 1.1 returns PASS, WARNING, FAIL or
 INSUFFICIENT_DURATION. PASS requires verified PAPER, complete initial/final
 IN_SYNC, valid evidence, no unresolved critical drift/reader failure, and no
 execution attempt. The shipped smoke profile runs 15 minutes with 30-second
@@ -978,6 +978,72 @@ qualifying clean soak evidence with existing Lot 9/connectivity prerequisites.
 Fake evidence or a short smoke yields INSUFFICIENT_EVIDENCE. Safety failures
 yield NOT_READY. Even READY_FOR_HUMAN_REVIEW neither arms execution nor grants
 permission to launch a campaign: a separate human decision remains mandatory.
+
+### Clock measurement observability (Lot 9.1.1)
+
+The original Lot 9.1 warning checked **every heartbeat**, but its final maximum
+used **snapshots only**. An intermediate warning could therefore disappear from
+the reported maximum. Soak schema 1.1 persists immutable `HeartbeatClockSample`
+records in checksummed batches under `soak_clock_samples/`, including samples
+that cause a hard failure before the first complete snapshot. The gate and final
+report now consume the same complete sample set. `clock_drift_max_seconds` is
+retained as a compatibility alias of `clock_raw_offset_max_seconds` for new runs.
+
+The gate's metric is explicitly `raw_server_time_offset_seconds`:
+`abs(local UTC at response dispatch - IBKR CURRENT_TIME epoch)`. Warning remains
+strictly **>2 seconds**, hard failure strictly **>5 seconds**. It is a conservative
+raw server-time offset, **not a measurement of pure machine clock drift**.
+Transport, pacing, callback dispatch delay, server timestamp quantization and
+wall-clock changes can all contribute. No second or RTT correction is subtracted
+from the gate metric, and no trading or clock threshold has been tuned.
+
+The official SDK 10.50.2 `currentTime(int)` callback supplies integer epoch
+seconds, without a request ID ([official callback contract](https://interactivebrokers.github.io/tws-api/interfaceIBApi_1_1EWrapper.html)).
+Every sample records resolution **1.0 second**, UTC send/receive times and
+monotonic send/receive times. RTT is the monotonic elapsed time, including local
+pacing/dispatch overhead, not an assumed pure wire latency. Negative/nonfinite
+elapsed times fail measurement. The signed midpoint estimate is
+`(send_utc + receive_utc)/2 - server_utc`, diagnostic only. Its deliberately broad
+uncertainty budget is `RTT/2 + 1 second + abs(wall_elapsed - monotonic_elapsed)/2`;
+this includes a full quantization second without assuming rounding direction.
+It is not a statistical confidence interval or proof of clock synchronization.
+
+Requests are single-flight. Overlapping requests, unsolicited replies, expired
+responses, or repeated/non-increasing epochs while a new request is pending
+invalidate the clock channel: UNKNOWN/discarded with an explicit reason, never
+a fabricated correlation. A timeout prevents another request on that connection
+until controlled reconnect. Identical replies to an already-completed request
+are deduplicated. A snapshot immediately following a heartbeat reuses its verified
+sample rather than issuing an indistinguishable same-second request. This relies
+on ordered callbacks on the one SDK connection; the protocol cannot prove an
+arbitrary unsolicited future reply belongs to a request that has no wire ID.
+No concurrent consumers may request CURRENT_TIME outside this tracker.
+
+The report, CLI and read-only Dashboard show current/max raw offset, raw p95,
+absolute midpoint-estimate maximum, current/max/p95 RTT, sample and warning counts,
+first/last warning UTC, peak UTC/sample ID, exact warning peak value, hard-failure
+sample ID and thresholds. Percentiles use nearest rank. Monitoring events carry
+these produced measurements; the UI never recalculates the gate. Inspect without
+connecting to IBKR using `paper read-only-report --session-id <id> --json` or
+the existing GET `/api/v1/broker/soak/report` and `/latest` endpoints.
+
+Old Lot 9/9.1 bundles remain readable and unchanged. Where heartbeat samples
+were not persisted, the new clock section is **UNAVAILABLE**; an old snapshot
+maximum is not substituted for a heartbeat maximum. In particular the reported
+`readonly-smoke-20260927-212134` WARNING/NO_PASS is **not promoted to PASS**.
+The discrepancy is explained structurally; its exact missing peak cannot be
+invented. A **new real 15-minute smoke**, then a clean qualifying real soak, are
+required. Neither is started by this development lot. On the authenticated local
+Paper PC, with the existing ignored config and allowlist prerequisites:
+
+```powershell
+$clockSmokeId = "readonly-clockfix-" + (Get-Date -Format "yyyyMMdd-HHmmss")
+.\.venv\Scripts\trading-ai.exe paper read-only-run --config data_local/ibkr_paper.local.toml --soak-config config/brokers/read_only_smoke.toml --session-id $clockSmokeId --duration-minutes 15 --snapshot-seconds 30 --json
+.\.venv\Scripts\trading-ai.exe paper read-only-report --session-id $clockSmokeId --json
+```
+
+Paper execution stays **NO**, LIVE hard-locked, and Lot 10 remains TODO pending
+separate human review. A warning-free synthetic fixture is not real soak evidence.
 
 ## Roadmap status
 

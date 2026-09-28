@@ -246,7 +246,9 @@ def create_dashboard_app(
     @app.get("/api/v1/broker/soak/report")
     def broker_soak_report(session_id: str = Query(...)) -> dict[str, Any]:
         view = soak_view(paper_store, session_id)
-        return {"integrity": view["integrity"], "report": view.get("report"), "gate": view["gate"]}
+        return {"integrity": view["integrity"], "report": view.get("report"), "gate": view["gate"],
+                "clock": view.get("clock", {"status": "UNAVAILABLE"}),
+                "clock_samples": view.get("clock_samples", [])}
 
     @app.get("/api/v1/broker/session")
     def broker_session(session_id: str = Query(...)) -> dict[str, Any]:
