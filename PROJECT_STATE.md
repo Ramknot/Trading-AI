@@ -29,9 +29,9 @@
 - IBKR Paper Connectivity Smoke: PASS (2026-09-23, read-only; SDK 10.50.2 / TWS server 223)
 - Paper Execution Armed: NO
 - Lot 9.1 — Paper Read-Only Soak & Reconciliation Gate: DONE
-- Lot 9.1.1 — IBKR Clock Drift Observability & Measurement Fix: IN PROGRESS
+- Lot 9.1.1 — IBKR Clock Drift Observability & Measurement Fix: DONE
 - IBKR Read-Only Soak Smoke: WARNING / NO_PASS (user-reported session readonly-smoke-20260927-212134; original evidence immutable)
-- Clock Observability Fix: IN PROGRESS
+- Clock Observability Fix: DONE
 - New Read-Only Smoke Required: YES
 - IBKR Read-Only Soak Validation: NOT_RUN
 - Lot 10 Readiness: INSUFFICIENT_EVIDENCE
@@ -157,6 +157,11 @@ failure, monotonic RTT, uncertainty, quantization, duplicates/late/overlapping
 replies, shutdown ambiguity, reader failure, legacy bundles, tampering, CLI/API,
 and MonitoringStore. All read-only fake sessions assert zero submit/cancel calls.
 No real TWS connection or new smoke was run during development.
+Implementation commit `5a35b798d11b59d3268518b2979497932ea716db` was pushed
+without force to `origin/main`; its exact GitHub Actions CI completed successfully:
+https://github.com/Ramknot/Trading-AI/actions/runs/36415361938
+Technical delivery is DONE. This does not change the historical WARNING/NO_PASS
+or authorize Lot 10, Paper execution, LIVE, or a new broker connection.
 
 Delivered: the provider-neutral `BrokerAdapter` lifecycle and an optional official TWS API `IBKRPaperAdapter` 1.0 isolated behind a fail-closed `PaperExecutionBoundary`; loopback-only, salted-hash Paper account verification; immutable unarmed session manifests; deterministic session/order state machines; exact contract resolution and tamper-evident cache; idempotent client-order keys; asynchronous callback queue, heartbeat, pacing and point-in-time broker timestamps; MARKET/LIMIT and DAY-only conversion; partial fills, explicit execution corrections and broker commission knowledge; cash-only long Paper ledger; startup/reconnect/restart reconciliation with external-activity and uncertain-submit halts; frozen component hashes; emergency halt without liquidation; decision/outcome envelopes, expected-versus-observed reporting, checksum-backed local Paper evidence, replay and shadow audit; a full fault-injectable offline `FakeBroker`; read-only Broker/Paper CLI and Dashboard endpoints. The explicit human review authorizes Lot 9 development only. At initial delivery no real IBKR Paper gateway was supplied, so connectivity was `EXTERNAL_SETUP_REQUIRED`. No Paper campaign or order was started, no SDK was vendored, `Paper Execution Armed` remains `NO`, and Lot 10/11, Future ML Evolution, and Aggressive Research remain locked.
 
