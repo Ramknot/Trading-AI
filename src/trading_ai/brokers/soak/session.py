@@ -101,21 +101,21 @@ class PaperReadOnlySession:
         stamp = self.now()
         row = {"event_id": f"soak-{self._sequence:08d}", "session_id": self.session_id,
                "timestamp": stamp, "event_type": kind, "state": self.state.value,
-               "source": "paper-read-only-session", "source_version": "1.1", **payload}
+               "source": "paper-read-only-session", "source_version": "1.2", **payload}
         self._pending_events.append(row)
         if self.monitoring_store is not None:
             self.monitoring_store.append_event(MonitoringEvent(
                 event_id=self.session_id + "-" + row["event_id"], timestamp=stamp,
                 event_type=MonitoringEventType.PAPER_READ_ONLY_SOAK,
                 run_id=self.session_id, session_id=self.session_id,
-                source_component="paper-read-only-session", component_version="1.1",
+                source_component="paper-read-only-session", component_version="1.2",
                 payload_json=json.dumps(to_primitive(row), sort_keys=True), status=kind,
             ))
 
     def _flush_events(self):
         if self._pending_clock_samples:
             self.store.append(self.session_id, "soak_clock_samples", {
-                "schema_version": "1.1", "samples": tuple(self._pending_clock_samples),
+                "schema_version": "1.2", "samples": tuple(self._pending_clock_samples),
             }, record_id=self._pending_clock_samples[-1].request_id)
             self._pending_clock_samples.clear()
         if self._pending_events:
@@ -151,6 +151,13 @@ class PaperReadOnlySession:
             "IBKR_CONNECTIVITY_RESTORED_DATA_LOST", "IBKR_SOCKET_PORT_RESET",
             "IBKR_SERVER_CONNECTIVITY_BROKEN", "IBKR_NOT_CONNECTED",
         }
+        # The unchanged adapter retains its raw-offset alarm. Only this read-only
+        # observer classifies that alarm using its recorded, matched gate sample.
+        # Never alter broker health or suppress any other critical error.
+        if (self.clock_samples and not self.broker.clock_measurement_error
+                and self.broker.latest_clock_sample == self.clock_samples[-1]
+                and self.clock_samples[-1].certain_clock_offset_seconds <= self.broker_config.max_clock_drift_seconds):
+            serious.discard("BROKER_CLOCK_DRIFT")
         if serious:
             self._callback_errors += 1
             raise SoakFailure("BROKER_CRITICAL_ERROR")
@@ -182,9 +189,9 @@ class PaperReadOnlySession:
                 self.clock_samples.append(sample)
                 self._pending_clock_samples.append(sample)
                 self._event("CLOCK_SAMPLE_RECORDED", sample_id=sample.sample_id, clock=self._clock_summary())
-                if sample.raw_server_time_offset_seconds > self.config.clock_warning_seconds:
+                if sample.certain_clock_offset_seconds > self.config.clock_warning_seconds:
                     self.warnings.add("CLOCK_DRIFT_WARNING")
-                if sample.raw_server_time_offset_seconds > self.broker_config.max_clock_drift_seconds:
+                if sample.certain_clock_offset_seconds > self.broker_config.max_clock_drift_seconds:
                     raise SoakFailure("BROKER_CLOCK_DRIFT")
             if self.broker.clock_measurement_error:
                 self.warnings.add("CLOCK_MEASUREMENT_UNKNOWN")
@@ -351,8 +358,8 @@ class PaperReadOnlySession:
         ))
         self.store.append(self.session_id, "soak_config", {
             "config": self.config, "previous_session_id": self.previous_session_id,
-            "continuity_claimed": False, "soak_schema_version": "1.1",
-            "clock_gate_metric": "raw_server_time_offset_seconds",
+            "continuity_claimed": False, "soak_schema_version": "1.2",
+            "clock_gate_metric": "certain_clock_offset_seconds",
             "clock_hard_threshold_seconds": self.broker_config.max_clock_drift_seconds,
         }, record_id="frozen")
         self._event("READ_ONLY_SOAK_STARTED")

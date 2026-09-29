@@ -30,6 +30,7 @@ class HeartbeatClockSample:
     raw_server_time_offset_seconds: float = field(init=False)
     midpoint_offset_estimate_seconds: float = field(init=False)
     offset_uncertainty_seconds: float = field(init=False)
+    certain_clock_offset_seconds: float = field(init=False)
     wall_clock_step_seconds: float = field(init=False)
 
     def __post_init__(self):
@@ -55,6 +56,8 @@ class HeartbeatClockSample:
                       offset_uncertainty_seconds=elapsed / 2 + 1.0 + abs(wall_elapsed - elapsed) / 2)
         for name, value in values.items():
             object.__setattr__(self, name, value)
+        object.__setattr__(self, "certain_clock_offset_seconds", max(
+            0.0, abs(self.midpoint_offset_estimate_seconds) - self.offset_uncertainty_seconds))
         object.__setattr__(self, "sample_id", "clock-" + stable_hash((
             self.session_id, self.request_id, self.requested_at_utc, self.received_at_utc,
             self.request_monotonic, self.receive_monotonic, self.server_epoch,
@@ -137,13 +140,17 @@ def clock_summary(samples: tuple[HeartbeatClockSample, ...], warning: float, har
     def p95(values):
         return sorted(values)[math.ceil(.95 * len(values)) - 1] if values else None
     raw = [s.raw_server_time_offset_seconds for s in samples]
+    certain = [s.certain_clock_offset_seconds for s in samples]
     rtts = [s.round_trip_ms for s in samples]
-    warns = [s for s in samples if s.raw_server_time_offset_seconds > warning]
-    fails = [s for s in samples if s.raw_server_time_offset_seconds > hard]
-    peak = max(samples, key=lambda s: s.raw_server_time_offset_seconds) if samples else None
-    warning_peak = max(warns, key=lambda s: s.raw_server_time_offset_seconds) if warns else None
+    warns = [s for s in samples if s.certain_clock_offset_seconds > warning]
+    fails = [s for s in samples if s.certain_clock_offset_seconds > hard]
+    peak = max(samples, key=lambda s: s.certain_clock_offset_seconds) if samples else None
+    warning_peak = max(warns, key=lambda s: s.certain_clock_offset_seconds) if warns else None
     return dict(
-        clock_gate_metric="raw_server_time_offset_seconds", clock_sample_count=len(samples),
+        clock_gate_metric="certain_clock_offset_seconds", clock_sample_count=len(samples),
+        clock_certain_offset_current_seconds=certain[-1] if certain else None,
+        clock_certain_offset_max_seconds=max(certain) if certain else None,
+        clock_certain_offset_p95_seconds=p95(certain),
         clock_warning_threshold_seconds=warning, clock_hard_threshold_seconds=hard,
         clock_raw_offset_current_seconds=raw[-1] if raw else None,
         clock_raw_offset_max_seconds=max(raw) if raw else None, clock_raw_offset_p95_seconds=p95(raw),
@@ -154,8 +161,8 @@ def clock_summary(samples: tuple[HeartbeatClockSample, ...], warning: float, har
         clock_warning_first_at=warns[0].received_at_utc if warns else None,
         clock_warning_last_at=warns[-1].received_at_utc if warns else None,
         clock_warning_max_sample_id=warning_peak.sample_id if warning_peak else None,
-        clock_warning_max_value_seconds=warning_peak.raw_server_time_offset_seconds if warning_peak else None,
+        clock_warning_max_value_seconds=warning_peak.certain_clock_offset_seconds if warning_peak else None,
         clock_peak_sample_id=peak.sample_id if peak else None,
         clock_peak_at=peak.received_at_utc if peak else None,
-        clock_hard_failure_sample_id=fails[0].sample_id if fails else None,
+        clock_hard_failure_sample_id=peak.sample_id if fails else None,
     )

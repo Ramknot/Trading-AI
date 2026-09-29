@@ -127,7 +127,7 @@ class GateResult:
     evidence_level: str
     reasons: tuple[str, ...]
     name: str = "paper-read-only-reconciliation"
-    version: str = "1.1"
+    version: str = "1.2"
 
 
 @dataclass(frozen=True)
@@ -166,8 +166,11 @@ class PaperReadOnlySoakReport:
     paper_execution_armed: bool = False
     live_hard_locked: bool = True
     decision_data_freshness: str = "NOT_EVALUATED"
-    soak_schema_version: str = "1.1"
+    soak_schema_version: str = "1.2"
     clock_gate_metric: str | None = None
+    clock_certain_offset_current_seconds: float | None = None
+    clock_certain_offset_max_seconds: float | None = None
+    clock_certain_offset_p95_seconds: float | None = None
     clock_sample_count: int | None = None
     clock_warning_threshold_seconds: float | None = None
     clock_hard_threshold_seconds: float | None = None
@@ -204,8 +207,8 @@ class PaperReadOnlySoakReport:
                     raise ValueError("clock warning requires persisted sample provenance")
             if "BROKER_CLOCK_DRIFT" in self.gate.reasons:
                 if (not self.clock_hard_failure_count or not self.clock_hard_failure_sample_id
-                    or self.clock_raw_offset_max_seconds is None or self.clock_hard_threshold_seconds is None
-                    or self.clock_raw_offset_max_seconds <= self.clock_hard_threshold_seconds):
+                    or self.clock_certain_offset_max_seconds is None or self.clock_hard_threshold_seconds is None
+                    or self.clock_certain_offset_max_seconds <= self.clock_hard_threshold_seconds):
                     raise ValueError("clock failure requires persisted sample provenance")
 
     @property

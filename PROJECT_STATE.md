@@ -30,6 +30,7 @@
 - Paper Execution Armed: NO
 - Lot 9.1 — Paper Read-Only Soak & Reconciliation Gate: DONE
 - Lot 9.1.1 — IBKR Clock Drift Observability & Measurement Fix: DONE
+- Lot 9.1.2 — Uncertainty-Aware Clock Gate Semantics: DONE
 - IBKR Read-Only Soak Smoke: WARNING / NO_PASS (user-reported session readonly-smoke-20260927-212134; original evidence immutable)
 - Clock Observability Fix: DONE
 - New Read-Only Smoke Required: YES
@@ -125,6 +126,18 @@ commit and push, without bypassing protections. Technical delivery is complete;
 at that delivery real read-only smoke/soak evidence was still NOT_RUN and Lot 10 readiness remained
 INSUFFICIENT_EVIDENCE. Lot 10 remains TODO; no connection or campaign is started
 by this delivery status.
+
+### Lot 9.1.2 uncertainty-aware clock gate
+
+Soak schema/gate 1.2 applies the unchanged >2 s / >5 s thresholds to
+`max(0, abs(midpoint_offset_estimate_seconds) - offset_uncertainty_seconds)`.
+Raw measurements and existing uncertainty remain visible; decision systems,
+adapter, execution guards, cadence and reconnect policy are unchanged.
+Historical WARNING/NO_PASS sessions are immutable, not reclassified.
+New Read-Only Smoke Required: YES. Lot 10 remains TODO / INSUFFICIENT_EVIDENCE;
+Paper Execution Armed remains NO. No TWS connection is performed in this lot.
+Local validation: 694 offline tests passed (one integration test deselected);
+compileall and pip check passed. No new dependency or threshold change.
 
 ### Lot 9.1.1 clock observability correction
 

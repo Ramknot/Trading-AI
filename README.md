@@ -989,13 +989,14 @@ that cause a hard failure before the first complete snapshot. The gate and final
 report now consume the same complete sample set. `clock_drift_max_seconds` is
 retained as a compatibility alias of `clock_raw_offset_max_seconds` for new runs.
 
-The gate's metric is explicitly `raw_server_time_offset_seconds`:
+The Lot 9.1.1 gate's historical metric was `raw_server_time_offset_seconds`:
 `abs(local UTC at response dispatch - IBKR CURRENT_TIME epoch)`. Warning remains
 strictly **>2 seconds**, hard failure strictly **>5 seconds**. It is a conservative
 raw server-time offset, **not a measurement of pure machine clock drift**.
 Transport, pacing, callback dispatch delay, server timestamp quantization and
 wall-clock changes can all contribute. No second or RTT correction is subtracted
-from the gate metric, and no trading or clock threshold has been tuned.
+from that historical gate metric. Lot 9.1.2 supersedes this metric below;
+no historical evidence or clock threshold is changed.
 
 The official SDK 10.50.2 `currentTime(int)` callback supplies integer epoch
 seconds, without a request ID ([official callback contract](https://interactivebrokers.github.io/tws-api/interfaceIBApi_1_1EWrapper.html)).
@@ -1044,6 +1045,23 @@ $clockSmokeId = "readonly-clockfix-" + (Get-Date -Format "yyyyMMdd-HHmmss")
 
 Paper execution stays **NO**, LIVE hard-locked, and Lot 10 remains TODO pending
 separate human review. A warning-free synthetic fixture is not real soak evidence.
+
+### Uncertainty-aware clock gate (Lot 9.1.2)
+
+**Raw offset is not proven clock drift.** Soak schema/gate 1.2 uses
+`certain_clock_offset_seconds = max(0, abs(midpoint_offset_estimate_seconds) - offset_uncertainty_seconds)`.
+It reuses the existing uncertainty budget unchanged. Warning remains **>2 s**,
+hard failure **>5 s**; cadence, reconnect policy and trading parameters are unchanged.
+This lower bound does not prove synchronization when it is small.
+Raw current/max/p95, midpoint, RTT and per-sample uncertainty remain observable.
+The report adds certain current/max/p95; warning/failure peak IDs refer to the
+certain metric. `clock_drift_max_seconds` remains the raw compatibility alias.
+The unchanged adapter's raw clock alarm remains visible in snapshots; only the
+read-only observer classifies it using its matched, recorded certain-offset sample.
+Other critical errors still fail closed; broker execution guards are unchanged.
+Old bundles keep their original gate and absent fields remain unavailable, even
+when old raw samples exist. A **new 15-minute smoke** using the command above,
+then a qualifying soak, is required. No real connection is launched by this lot.
 
 ## Roadmap status
 

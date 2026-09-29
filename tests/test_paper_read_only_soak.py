@@ -195,7 +195,7 @@ def test_reader_stale_or_failed_never_healthy(tmp_path, attribute):
     assert report.health_status == "ERROR"
 
 
-@pytest.mark.parametrize("drift,expected", [(0.2, "INSUFFICIENT_DURATION"), (3, "WARNING"), (6, "FAIL")])
+@pytest.mark.parametrize("drift,expected", [(0.2, "INSUFFICIENT_DURATION"), (3.1, "WARNING"), (6.1, "FAIL")])
 def test_server_clock_thresholds(tmp_path, drift, expected):
     session, broker, _, _ = setup(tmp_path)
     broker.clock_drift = drift

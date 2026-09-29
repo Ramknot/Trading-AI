@@ -38,6 +38,7 @@ def test_rtt_midpoint_resolution_uncertainty_and_immutability():
     assert s.raw_server_time_offset_seconds == s.raw_offset_seconds == 2.4
     assert s.midpoint_offset_estimate_seconds == 2.2
     assert s.offset_uncertainty_seconds == pytest.approx(1.2)
+    assert s.certain_clock_offset_seconds == pytest.approx(1.0)
     assert s.server_timestamp_resolution_seconds == 1
     assert s.source == "IBKR_CURRENT_TIME" and s.server_time_utc == BASE
     assert s.sample_id == sample().sample_id
@@ -116,37 +117,43 @@ def test_unsolicited_current_time_is_explicitly_unknown():
     assert t.receive(EPOCH) is None and t.error == "CLOCK_RESPONSE_UNSOLICITED"
 
 
-def test_transient_24_heartbeat_vs_18_snapshot_regression(tmp_path):
+@pytest.mark.parametrize("peak_offset,warning", [(2.4, False), (3.4, True)])
+def test_transient_heartbeat_vs_snapshot_regression(tmp_path, peak_offset, warning):
     session, broker, store, _ = setup(tmp_path, scheduled=(
-        (10, lambda b: setattr(b, "clock_drift", 2.4)),
+        (10, lambda b: setattr(b, "clock_drift", peak_offset)),
         (20, lambda b: setattr(b, "clock_drift", 1.8))))
     broker.clock_drift = 1.8
     report = run(session, broker)
     assert max(s.health.clock_drift_seconds for s in session.snapshots) == 1.8
-    assert report.clock_drift_max_seconds == report.clock_raw_offset_max_seconds == 2.4
-    assert report.gate.status == "WARNING" and report.gate.evidence_level == "NO_PASS"
-    assert report.clock_warning_count == 1
+    assert report.clock_drift_max_seconds == report.clock_raw_offset_max_seconds == peak_offset
+    assert report.clock_certain_offset_max_seconds == pytest.approx(peak_offset - 1)
+    assert report.clock_certain_offset_current_seconds == pytest.approx(.8)
+    assert report.gate.status == ("WARNING" if warning else "INSUFFICIENT_DURATION")
+    assert report.clock_warning_count == int(warning)
     samples = persisted_samples(store, session.session_id)
-    peak = next(s for s in samples if s["sample_id"] == report.clock_warning_max_sample_id)
-    assert peak["raw_server_time_offset_seconds"] == report.clock_warning_max_value_seconds == 2.4
-    assert peak["received_at_utc"] == report.clock_warning_first_at.isoformat()
-    assert report.clock_warning_first_at == report.clock_warning_last_at
+    if warning:
+        peak = next(s for s in samples if s["sample_id"] == report.clock_warning_max_sample_id)
+        assert peak["certain_clock_offset_seconds"] == report.clock_warning_max_value_seconds == pytest.approx(peak_offset - 1)
+        assert peak["received_at_utc"] == report.clock_warning_first_at.isoformat()
+        assert report.clock_warning_first_at == report.clock_warning_last_at
     assert len(samples) == report.clock_sample_count > len(session.snapshots)
-    assert report.clock_gate_metric == "raw_server_time_offset_seconds"
+    assert report.clock_gate_metric == "certain_clock_offset_seconds"
     assert report.clock_warning_threshold_seconds == 2 and report.clock_hard_threshold_seconds == 5
     with pytest.raises(ValueError, match="same evaluated samples"):
         replace(report, clock_drift_max_seconds=1.8)
-    with pytest.raises(ValueError, match="provenance"):
-        replace(report, clock_warning_max_sample_id=None)
+    if warning:
+        with pytest.raises(ValueError, match="provenance"):
+            replace(report, clock_warning_max_sample_id=None)
 
 
-@pytest.mark.parametrize("offset,warning,hard", [(1.8, False, False), (2, False, False),
-    (2.4, True, False), (5, True, False), (5.1, True, True)])
-def test_thresholds_raw_unchanged_and_persisted_even_before_snapshot(tmp_path, offset, warning, hard):
+@pytest.mark.parametrize("offset,warning,hard", [(2.09, False, False), (3, False, False),
+    (3.4, True, False), (6, True, False), (6.1, True, True)])
+def test_thresholds_unchanged_on_certain_metric_persisted_before_snapshot(tmp_path, offset, warning, hard):
     session, broker, store, _ = setup(tmp_path, duration=10)
     broker.clock_drift = offset
     report = run(session, broker)
     assert report.clock_raw_offset_max_seconds == offset
+    assert report.clock_certain_offset_max_seconds == pytest.approx(offset - 1)
     assert bool(report.clock_warning_count) == warning
     assert ("CLOCK_DRIFT_WARNING" in report.warnings) == warning
     samples = persisted_samples(store, session.session_id)
@@ -164,6 +171,7 @@ def test_percentiles_are_nearest_rank_and_diagnostic_only():
     summary = clock_summary(values, 2, 5)
     assert summary["clock_raw_offset_p95_seconds"] == 1.9
     assert summary["clock_rtt_p95_ms"] == pytest.approx(190)
+    assert summary["clock_certain_offset_p95_seconds"] == pytest.approx(.71)
     assert summary["clock_warning_count"] == 0
     assert clock_summary((), 2, 5)["clock_raw_offset_max_seconds"] is None
 
@@ -203,7 +211,8 @@ def test_cli_api_show_persisted_clock_metrics_read_only(tmp_path, capsys):
     assert client.post("/api/v1/broker/soak/report").status_code == 405
 
 
-def test_legacy_report_inspection_does_not_invent_or_rewrite_samples(tmp_path):
+@pytest.mark.parametrize("legacy_samples", [False, True])
+def test_legacy_report_inspection_does_not_invent_or_rewrite_samples(tmp_path, legacy_samples):
     session, broker, store, _ = setup(tmp_path / "new", duration=10)
     run(session, broker)
     payload = store.inspect(session.session_id)
@@ -215,17 +224,61 @@ def test_legacy_report_inspection_does_not_invent_or_rewrite_samples(tmp_path):
     manifest["config_hashes"] = tuple(tuple(x) for x in manifest["config_hashes"])
     manifest["ml_model_ids"] = tuple(manifest["ml_model_ids"])
     legacy.create_session(PaperSessionManifest(**manifest))
+    old_clock = {}
+    if legacy_samples:
+        from trading_ai.core.hashing import to_primitive
+        old_sample = to_primitive(sample(offset=2.09, rtt=0))
+        del old_sample["certain_clock_offset_seconds"]
+        legacy.append(session.session_id, "soak_clock_samples", {
+            "schema_version": "1.1", "samples": [old_sample]}, record_id="old")
+        old_clock = {"clock_sample_count": 1, "clock_gate_metric": "raw_server_time_offset_seconds"}
     legacy.append(session.session_id, "soak_reports", {
         "state": "COMPLETED", "clock_drift_max_seconds": 1.879262,
         "gate": {"status": "WARNING", "evidence_level": "NO_PASS", "reasons": ["CLOCK_DRIFT_WARNING"]},
+        **old_clock,
     }, record_id="final")
     directory = tmp_path / "legacy" / "paper" / session.session_id
     before = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in directory.rglob("*.json")}
     view = soak_view(LocalPaperMonitoringReader(tmp_path / "legacy" / "paper"), session.session_id)
-    assert view["clock"]["status"] == "UNAVAILABLE" and view["clock_samples"] == []
+    assert view["clock"]["status"] == ("AVAILABLE" if legacy_samples else "UNAVAILABLE")
+    assert all("certain_clock_offset_seconds" not in s for s in view["clock_samples"])
     assert "clock_warning_count" not in view["clock"]
+    assert "clock_certain_offset_max_seconds" not in view["clock"]
     assert view["gate"]["status"] == "WARNING" and view["report"]["clock_drift_max_seconds"] == 1.879262
     assert before == {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in directory.rglob("*.json")}
+
+
+def test_raw_peak_and_gate_peak_are_distinct_with_exact_provenance():
+    raw_peak = sample(offset=10, rtt=8, sequence=1)  # midpoint=6, uncertainty=5
+    gate_peak = sample(offset=7, rtt=0, sequence=2)  # certain=6
+    summary = clock_summary((raw_peak, sample(offset=6.5, rtt=0, sequence=3), gate_peak), 2, 5)
+    assert summary["clock_raw_offset_max_seconds"] == 10
+    assert raw_peak.certain_clock_offset_seconds == 1
+    assert summary["clock_certain_offset_max_seconds"] == 6
+    assert summary["clock_warning_max_value_seconds"] == 6
+    assert summary["clock_peak_sample_id"] == summary["clock_warning_max_sample_id"] == gate_peak.sample_id
+    assert summary["clock_hard_failure_sample_id"] == gate_peak.sample_id
+
+
+def test_high_raw_uncertainty_read_only_gate_does_not_change_adapter_health(tmp_path):
+    session, broker, store, _ = setup(tmp_path, duration=10)
+    broker.clock_drift, broker.clock_rtt_seconds = 8, 8
+    original_health = broker.health
+    broker.health = lambda: replace(original_health(), critical_errors=("BROKER_CLOCK_DRIFT",))
+    report = run(session, broker)
+    assert report.clock_raw_offset_max_seconds == 8
+    assert report.clock_certain_offset_max_seconds == 0
+    assert report.clock_warning_count == report.clock_hard_failure_count == 0
+    assert "CLOCK_DRIFT_WARNING" not in report.warnings and report.gate.status != "FAIL"
+    assert all(s["offset_uncertainty_seconds"] == 5 for s in persisted_samples(store, session.session_id))
+    assert session.snapshots[0].health.critical_errors == ("BROKER_CLOCK_DRIFT",)
+
+
+def test_legacy_raw_alarm_without_matched_sample_still_fails_closed(tmp_path):
+    from trading_ai.brokers.soak.session import SoakFailure
+    session, broker, _, _ = setup(tmp_path)
+    with pytest.raises(SoakFailure, match="BROKER_CRITICAL_ERROR"):
+        session._check_callback_health(replace(broker.health(), critical_errors=("BROKER_CLOCK_DRIFT",)))
 
 
 def test_clock_batch_tampering_fails_integrity(tmp_path):

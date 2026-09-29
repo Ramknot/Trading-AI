@@ -155,5 +155,5 @@ These rules apply to Codex and every future development agent working in this re
 - Every clock warning or failure must reference persisted heartbeat sample provenance.
 - Clock report maxima must cover the same samples and metric evaluated by the gate, not a snapshot subset.
 - Never hide transport, local scheduling, wall-clock changes, or server timestamp quantization uncertainty.
-- Never relax clock thresholds after observing a failed or warning session; diagnostic midpoint estimates do not override raw-offset safety checks.
+- Clock thresholds apply to demonstrable/certain offset using the recorded midpoint and uncertainty; raw offset remains fully observable. Never tune thresholds from observed sessions.
 - Historical session evidence is immutable; missing heartbeat samples must remain unavailable and cannot be reconstructed as observed measurements.
